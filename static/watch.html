@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch - Yattee Server</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="/static/vendor/video-js.css" rel="stylesheet">
+    <script>if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark')</script>
+    <style>
+        /* Video.js customizations for dark theme */
+        .video-js {
+            font-family: inherit;
+        }
+        .video-js .vjs-control-bar {
+            background: rgba(0, 0, 0, 0.7);
+        }
+        .video-js .vjs-big-play-button {
+            background-color: rgba(115, 103, 240, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            line-height: 80px;
+            top: 50%;
+            left: 50%;
+            margin-top: -40px;
+            margin-left: -40px;
+        }
+        .video-js .vjs-big-play-button:hover {
+            background-color: rgb(115, 103, 240);
+        }
+        .video-js .vjs-slider {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        .video-js .vjs-load-progress {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .video-js .vjs-play-progress {
+            background: rgb(115, 103, 240);
+        }
+        .video-js .vjs-volume-level {
+            background: rgb(115, 103, 240);
+        }
+        /* Quality menu */
+        .vjs-menu-button-popup .vjs-menu {
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 4px;
+        }
+        .vjs-menu li.vjs-selected {
+            background: rgb(115, 103, 240);
+        }
+        /* Description gradient */
+        .description-gradient {
+            position: relative;
+            max-height: 100px;
+            overflow: hidden;
+        }
+        .description-gradient::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(transparent, var(--color-card, #1e1e2e));
+            pointer-events: none;
+        }
+        .description-expanded {
+            max-height: none;
+        }
+        .description-expanded::after {
+            display: none;
+        }
+        /* Custom select styling */
+        .custom-select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 28px;
+        }
+        /* Video container - let Video.js handle aspect ratio */
+        .video-container {
+            position: relative;
+            width: 100%;
+        }
+        .video-container .video-js {
+            width: 100%;
+        }
+    </style>
+</head>
+<body x-data x-init="$store.watch.init()">
+    <header class="bg-card px-4 py-2 border-b border-border flex justify-between items-center">
+        <div class="flex items-center gap-6">
+            <a href="/" class="text-text flex items-center gap-2" style="text-decoration:none">
+                <img src="/static/icon.png" alt="" width="32" height="32" style="border-radius:6px">
+                <span class="text-xl font-semibold">Yattee Server</span>
+            </a>
+            <nav class="flex gap-4">
+                <span class="text-primary font-medium">Watch</span>
+                <a href="/admin#sites" class="text-muted hover:text-text transition-colors font-medium"
+                   x-show="$store.watch.currentUser?.is_admin">Sites</a>
+                <a href="/admin#users" class="text-muted hover:text-text transition-colors font-medium"
+                   x-show="$store.watch.currentUser?.is_admin">Users</a>
+                <a href="/admin#watched-channels" class="text-muted hover:text-text transition-colors font-medium"
+                   x-show="$store.watch.currentUser?.is_admin">Channels</a>
+                <a href="/admin#settings" class="text-muted hover:text-text transition-colors font-medium"
+                   x-show="$store.watch.currentUser?.is_admin">Settings</a>
+            </nav>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-muted font-medium" x-text="$store.watch.currentUser?.username"></span>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <svg class="theme-icon-sun w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                <svg class="theme-icon-moon w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-5">
+        <!-- URL Input Form -->
+        <div class="bg-card rounded-lg p-5 mb-5 border border-border" x-data="watchPage">
+            <form @submit.prevent="loadVideo()">
+                <div class="flex gap-3">
+                    <input type="url"
+                           x-model="urlInput"
+                           :placeholder="$store.watch.placeholderText"
+                           class="input-base flex-1"
+                           :disabled="$store.watch.loading"
+                           required>
+                    <button type="submit"
+                            class="btn-primary whitespace-nowrap"
+                            :disabled="$store.watch.loading">
+                        <template x-if="$store.watch.loading">
+                            <span class="flex items-center gap-2">
+                                <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                Loading...
+                            </span>
+                        </template>
+                        <template x-if="!$store.watch.loading">
+                            <span>Watch</span>
+                        </template>
+                    </button>
+                </div>
+            </form>
+
+            <!-- Autoplay Toggle -->
+            <div class="flex items-center gap-2 mt-4">
+                <label class="toggle">
+                    <input type="checkbox" :checked="$store.watch.autoplay" @change="$store.watch.toggleAutoplay()">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span class="text-sm text-muted cursor-pointer" @click="$store.watch.toggleAutoplay()">Autoplay</span>
+            </div>
+
+            <!-- Loading Steps -->
+            <div x-show="$store.watch.loading" class="mt-4 text-muted">
+                <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span x-text="$store.watch.loadingStep"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Display -->
+        <div x-show="$store.watch.error" class="bg-card rounded-lg p-5 mb-5 border border-red-500/50">
+            <div class="flex items-start gap-3">
+                <div class="text-red-500 text-xl">!</div>
+                <div>
+                    <h3 class="font-medium text-red-400 mb-2">Failed to load video</h3>
+                    <p class="text-muted" x-text="$store.watch.error"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Video Player & Info -->
+        <div x-show="$store.watch.videoData && !$store.watch.loading" x-cloak>
+            <!-- Player -->
+            <div class="bg-black rounded-lg overflow-hidden mb-5" x-data="videoPlayer">
+                <div class="video-container">
+                    <video x-ref="videoElement"
+                           class="video-js vjs-default-skin vjs-big-play-centered"
+                           playsinline>
+                    </video>
+                </div>
+
+                <!-- Player Controls Bar -->
+                <div class="bg-card border-t border-border px-4 py-3 flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex gap-3 items-center flex-wrap">
+                        <!-- Quality Selector -->
+                        <div x-show="qualities.length > 0">
+                            <label class="text-xs text-muted mr-1">Quality:</label>
+                            <select x-model="selectedQuality"
+                                    @change="changeQuality()"
+                                    class="custom-select bg-bg border border-border rounded px-2 py-1 text-sm">
+                                <template x-for="q in qualities" :key="q.itag">
+                                    <option :value="q.itag" x-text="q.label"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <!-- Audio Selector (for separate audio tracks) -->
+                        <div x-show="audioTracks.length > 1">
+                            <label class="text-xs text-muted mr-1">Audio:</label>
+                            <select x-model="selectedAudio"
+                                    @change="changeAudio()"
+                                    class="custom-select bg-bg border border-border rounded px-2 py-1 text-sm">
+                                <template x-for="a in audioTracks" :key="a.itag">
+                                    <option :value="a.itag" x-text="a.label"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <!-- Speed Selector -->
+                        <div>
+                            <label class="text-xs text-muted mr-1">Speed:</label>
+                            <select x-model="playbackRate"
+                                    @change="changeSpeed()"
+                                    class="custom-select bg-bg border border-border rounded px-2 py-1 text-sm">
+                                <option value="0.5">0.5x</option>
+                                <option value="0.75">0.75x</option>
+                                <option value="1" selected>1x</option>
+                                <option value="1.25">1.25x</option>
+                                <option value="1.5">1.5x</option>
+                                <option value="1.75">1.75x</option>
+                                <option value="2">2x</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 items-center">
+                        <!-- PiP Button -->
+                        <button @click="togglePip()"
+                                class="btn-sm-secondary"
+                                x-show="pipSupported"
+                                title="Picture in Picture">
+                            PiP
+                        </button>
+
+                        <!-- Keyboard Shortcuts Info -->
+                        <div class="text-xs text-muted hidden sm:block">
+                            Space: play/pause | Arrows: seek | F: fullscreen | M: mute
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video Info -->
+            <div class="bg-card rounded-lg p-5 mb-5 border border-border" x-data="videoInfo">
+                <h2 class="text-xl font-semibold mb-2" x-text="$store.watch.videoData?.title"></h2>
+
+                <div class="flex flex-wrap gap-4 text-muted text-sm mb-4">
+                    <span x-text="$store.watch.videoData?.author"></span>
+                    <span x-show="$store.watch.videoData?.viewCount">
+                        <span x-text="formatNumber($store.watch.videoData?.viewCount)"></span> views
+                    </span>
+                    <span x-show="$store.watch.videoData?.publishedText" x-text="$store.watch.videoData?.publishedText"></span>
+                    <span x-show="$store.watch.videoData?.extractor" class="px-2 py-0.5 bg-border rounded text-xs" x-text="$store.watch.videoData?.extractor"></span>
+                    <span x-show="$store.watch.videoData?.lengthSeconds > 0" x-text="formatDuration($store.watch.videoData?.lengthSeconds)"></span>
+                </div>
+
+                <!-- Collapsible Description -->
+                <div x-show="$store.watch.videoData?.description">
+                    <div :class="descriptionExpanded ? 'description-expanded' : 'description-gradient'"
+                         class="text-muted text-sm whitespace-pre-wrap leading-relaxed"
+                         x-html="formatDescription($store.watch.videoData?.descriptionHtml || $store.watch.videoData?.description)">
+                    </div>
+                    <button @click="descriptionExpanded = !descriptionExpanded"
+                            class="text-primary text-sm mt-2 hover:underline"
+                            x-text="descriptionExpanded ? 'Show less' : 'Show more'">
+                    </button>
+                </div>
+            </div>
+
+            <!-- Downloads Panel -->
+            <div class="bg-card rounded-lg border border-border" x-data="downloadsPanel">
+                <button @click="expanded = !expanded"
+                        class="w-full px-5 py-4 flex justify-between items-center hover:bg-bg/50 transition-colors">
+                    <h3 class="text-lg font-medium">Downloads</h3>
+                    <span class="text-muted" x-text="expanded ? '−' : '+'"></span>
+                </button>
+
+                <div x-show="expanded" x-transition class="px-5 pb-5 border-t border-border pt-4">
+                    <!-- Combined Formats -->
+                    <div x-show="combinedFormats.length > 0" class="mb-4">
+                        <h4 class="text-sm font-medium text-muted mb-2">Video + Audio</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            <template x-for="f in combinedFormats" :key="f.itag">
+                                <a :href="f.url"
+                                   :download="getFilename(f)"
+                                   class="flex items-center justify-between bg-bg border border-border rounded px-3 py-2 hover:border-primary transition-colors">
+                                    <div>
+                                        <span class="font-medium" x-text="f.quality || f.resolution"></span>
+                                        <span class="text-muted text-sm ml-2" x-text="f.container"></span>
+                                    </div>
+                                    <span class="text-muted text-xs" x-show="f.size" x-text="f.size"></span>
+                                </a>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Video Only Formats -->
+                    <div x-show="videoOnlyFormats.length > 0" class="mb-4">
+                        <h4 class="text-sm font-medium text-muted mb-2">Video Only</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            <template x-for="f in videoOnlyFormats" :key="f.itag">
+                                <a :href="f.url"
+                                   :download="getFilename(f)"
+                                   class="flex items-center justify-between bg-bg border border-border rounded px-3 py-2 hover:border-primary transition-colors">
+                                    <div>
+                                        <span class="font-medium" x-text="f.resolution || f.quality"></span>
+                                        <span class="text-muted text-sm ml-2" x-text="f.encoding || f.container"></span>
+                                        <span class="text-muted text-xs ml-1" x-show="f.fps > 30" x-text="f.fps + 'fps'"></span>
+                                    </div>
+                                    <span class="text-muted text-xs" x-show="f.clen" x-text="formatBytes(f.clen)"></span>
+                                </a>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Audio Only Formats -->
+                    <div x-show="audioOnlyFormats.length > 0">
+                        <h4 class="text-sm font-medium text-muted mb-2">Audio Only</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            <template x-for="f in audioOnlyFormats" :key="f.itag">
+                                <a :href="f.url"
+                                   :download="getFilename(f)"
+                                   class="flex items-center justify-between bg-bg border border-border rounded px-3 py-2 hover:border-primary transition-colors">
+                                    <div>
+                                        <span class="font-medium" x-text="f.audioQuality || f.bitrate || 'Audio'"></span>
+                                        <span class="text-muted text-sm ml-2" x-text="f.container"></span>
+                                        <span class="text-muted text-xs ml-1" x-show="f.audioTrack?.displayName" x-text="f.audioTrack.displayName"></span>
+                                    </div>
+                                    <span class="text-muted text-xs" x-show="f.clen" x-text="formatBytes(f.clen)"></span>
+                                </a>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div x-show="combinedFormats.length === 0 && videoOnlyFormats.length === 0 && audioOnlyFormats.length === 0"
+                         class="text-muted text-center py-4">
+                        No downloadable formats available
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Alpine stores and components -->
+    <script src="/static/js/alpine/stores/utils.js"></script>
+    <script src="/static/js/alpine/stores/toast.js"></script>
+    <script src="/static/js/alpine/stores/watch.js"></script>
+    <script src="/static/js/alpine/components/watch/page.js"></script>
+    <script src="/static/js/alpine/components/watch/player.js"></script>
+    <script src="/static/js/alpine/components/watch/videoInfo.js"></script>
+    <script src="/static/js/alpine/components/watch/downloads.js"></script>
+    <!-- Video.js -->
+    <script src="/static/vendor/video.min.js"></script>
+    <!-- Alpine.js -->
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script>
+        function toggleTheme(){var d=document.documentElement;if(d.getAttribute('data-theme')==='dark'){d.removeAttribute('data-theme');localStorage.removeItem('theme')}else{d.setAttribute('data-theme','dark');localStorage.setItem('theme','dark')}}
+    </script>
+    <style>.theme-icon-moon{display:none}[data-theme="dark"] .theme-icon-sun{display:none}[data-theme="dark"] .theme-icon-moon{display:block}</style>
+</body>
+</html>

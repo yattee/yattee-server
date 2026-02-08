@@ -1,0 +1,179 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Rick Astley - Never Gonna Give You Up (Official Music Video)",
+  "description": "The official music video for Rick Astley's \"Never Gonna Give You Up\"",
+  "uploader": "Rick Astley",
+  "uploader_id": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "uploader_url": "https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw",
+  "channel": "Rick Astley",
+  "channel_id": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "channel_url": "https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw",
+  "duration": 212,
+  "view_count": 1500000000,
+  "like_count": 15000000,
+  "upload_date": "20091025",
+  "availability": "public",
+  "live_status": "not_live",
+  "thumbnail": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+  "thumbnails": [
+    {
+      "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg",
+      "width": 120,
+      "height": 90,
+      "id": "0"
+    },
+    {
+      "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+      "width": 320,
+      "height": 180,
+      "id": "1"
+    },
+    {
+      "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "width": 480,
+      "height": 360,
+      "id": "2"
+    },
+    {
+      "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/sddefault.jpg",
+      "width": 640,
+      "height": 480,
+      "id": "3"
+    },
+    {
+      "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+      "width": 1280,
+      "height": 720,
+      "id": "4"
+    }
+  ],
+  "formats": [
+    {
+      "format_id": "18",
+      "format_note": "360p",
+      "ext": "mp4",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=18&source=youtube",
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "vcodec": "avc1.42001E",
+      "acodec": "mp4a.40.2",
+      "abr": 96,
+      "vbr": 400,
+      "tbr": 496.0,
+      "protocol": "https",
+      "container": "mp4",
+      "resolution": "640x360"
+    },
+    {
+      "format_id": "22",
+      "format_note": "720p",
+      "ext": "mp4",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=22&source=youtube",
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "vcodec": "avc1.64001F",
+      "acodec": "mp4a.40.2",
+      "abr": 192,
+      "vbr": 2500,
+      "tbr": 2692.0,
+      "protocol": "https",
+      "container": "mp4",
+      "resolution": "1280x720"
+    },
+    {
+      "format_id": "137",
+      "format_note": "1080p",
+      "ext": "mp4",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=137&source=youtube",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "vbr": 4400,
+      "tbr": 4400.0,
+      "protocol": "https",
+      "container": "mp4",
+      "resolution": "1920x1080"
+    },
+    {
+      "format_id": "140",
+      "format_note": "medium",
+      "ext": "m4a",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=140&source=youtube",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "abr": 128,
+      "tbr": 128.0,
+      "protocol": "https",
+      "container": "m4a_dash",
+      "resolution": "audio only"
+    },
+    {
+      "format_id": "251",
+      "format_note": "medium",
+      "ext": "webm",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=251&source=youtube",
+      "vcodec": "none",
+      "acodec": "opus",
+      "abr": 160,
+      "tbr": 160.0,
+      "protocol": "https",
+      "container": "webm_dash",
+      "resolution": "audio only"
+    },
+    {
+      "format_id": "313",
+      "format_note": "2160p",
+      "ext": "webm",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?expire=1234567890&ei=abc&ip=1.2.3.4&id=o-def&itag=313&source=youtube",
+      "width": 3840,
+      "height": 2160,
+      "fps": 30,
+      "vcodec": "vp9",
+      "acodec": "none",
+      "vbr": 20000,
+      "tbr": 20000.0,
+      "protocol": "https",
+      "container": "webm_dash",
+      "resolution": "3840x2160"
+    }
+  ],
+  "subtitles": {
+    "en": [
+      {
+        "ext": "json3",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=asr&xoaf=5&hl=en&ip=0.0.0.0&lang=en&fmt=json3"
+      },
+      {
+        "ext": "srv1",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=asr&xoaf=5&hl=en&ip=0.0.0.0&lang=en&fmt=srv1"
+      },
+      {
+        "ext": "vtt",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=asr&xoaf=5&hl=en&ip=0.0.0.0&lang=en&fmt=vtt"
+      }
+    ],
+    "es": [
+      {
+        "ext": "vtt",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=asr&xoaf=5&hl=en&ip=0.0.0.0&lang=es&fmt=vtt"
+      }
+    ]
+  },
+  "automatic_captions": {
+    "en": [
+      {
+        "ext": "vtt",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=asr&xoaf=5&hl=en&ip=0.0.0.0&lang=en&kind=asr&fmt=vtt"
+      }
+    ]
+  },
+  "extractor": "youtube",
+  "extractor_key": "Youtube",
+  "webpage_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "categories": ["Music"],
+  "tags": ["rick astley", "never gonna give you up"]
+}

@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yattee Server</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark')</script>
+</head>
+<body x-data x-init="$store.app.init()">
+    <header class="bg-card px-4 py-2 border-b border-border flex justify-between items-center">
+        <div class="flex items-center gap-6">
+            <a href="/" class="text-text flex items-center gap-2" style="text-decoration:none">
+                <img src="/static/icon.png" alt="" width="32" height="32" style="border-radius:6px">
+                <span class="text-xl font-semibold">Yattee Server</span>
+            </a>
+            <nav class="flex gap-4">
+                <a href="/watch" class="text-muted hover:text-text transition-colors font-medium">Watch</a>
+                <template x-for="tab in $store.tabs.tabs" :key="tab.id">
+                    <button class="bg-transparent border-none cursor-pointer transition-colors font-medium"
+                            :class="$store.tabs.isActive(tab.id) ? 'text-primary' : 'text-muted hover:text-text'"
+                            @click="$store.tabs.switchTab(tab.id)"
+                            x-text="tab.label">
+                    </button>
+                </template>
+            </nav>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-muted font-medium" x-text="$store.app.currentUser?.username"></span>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <svg class="theme-icon-sun w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                <svg class="theme-icon-moon w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main View -->
+    <div id="main-view" class="max-w-7xl mx-auto p-5">
+
+        <!-- Sites Tab -->
+        <div x-show="$store.tabs.activeTab === 'sites'" x-data="sitesManager">
+            <!-- List View -->
+            <div x-show="view === 'list'">
+                <div class="bg-card rounded-lg p-5 mb-5 border border-border">
+                    <div class="flex justify-between items-center mb-4 pb-4 border-b border-border">
+                        <h2 class="text-xl font-semibold">Configured Sites</h2>
+                        <button class="btn-sm-primary" @click="showAddForm()">+ Add Site</button>
+                    </div>
+                    <div id="sites-list" class="flex flex-col gap-4">
+                        <!-- Loading -->
+                        <template x-if="loading">
+                            <div class="flex justify-center items-center py-10">
+                                <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin"></div>
+                            </div>
+                        </template>
+
+                        <!-- Empty state -->
+                        <template x-if="!loading && sites.length === 0">
+                            <div class="text-center py-10 px-5 text-muted">
+                                <h3 class="mb-2 text-text font-medium">No sites configured</h3>
+                                <p>Add a site to configure credentials for video extraction</p>
+                            </div>
+                        </template>
+
+                        <!-- Sites list -->
+                        <template x-for="site in sites" :key="site.id">
+                            <div class="bg-bg border border-border rounded-lg px-5 py-4 flex justify-between items-center"
+                                 :class="{ 'opacity-60': !site.enabled }">
+                                <div>
+                                    <h3 class="text-lg font-medium mb-1" x-text="site.name"></h3>
+                                    <div class="text-muted font-mono text-sm" x-text="site.extractor_pattern"></div>
+                                    <div class="text-muted text-sm mt-1" x-text="site.credential_count ? site.credential_count + ' credential(s)' : 'No credentials'"></div>
+                                </div>
+                                <div class="flex gap-2.5 items-center">
+                                    <label class="toggle">
+                                        <input type="checkbox" :checked="site.enabled" @change="toggleSite(site.id, $event.target.checked)">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <button class="btn-sm-secondary" @click="$dispatch('open-test-modal', { siteId: site.id })">Test</button>
+                                    <button class="btn-sm-secondary" @click="showEditForm(site.id)">Edit</button>
+                                    <button class="btn-sm-danger" @click="deleteSite(site.id)">Delete</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form View -->
+            <div x-show="view === 'form'" x-cloak>
+                <div class="flex items-center gap-4 mb-5">
+                    <button type="button" class="btn-secondary" @click="hideForm()">&larr; Back</button>
+                    <h2 class="text-xl font-semibold" x-text="formTitle"></h2>
+                </div>
+
+                <div class="bg-card rounded-lg p-5 mb-5 border border-border">
+                    <form @submit.prevent="saveSite()">
+                        <div class="mb-5">
+                            <label for="site-selector" class="block mb-2 font-medium">Site</label>
+                            <select id="site-selector" class="input-base" x-model="selectedExtractor" @change="onExtractorChange()">
+                                <option value="">Select a site...</option>
+                                <template x-for="extractor in $store.app.extractors" :key="extractor.id">
+                                    <option :value="extractor.id" x-text="extractor.name"></option>
+                                </template>
+                                <option value="custom">Custom / Other...</option>
+                            </select>
+                        </div>
+
+                        <div x-show="showCustomFields" x-cloak>
+                            <div class="flex gap-4">
+                                <div class="flex-1 mb-5">
+                                    <label for="site-name" class="block mb-2 font-medium">Site Name</label>
+                                    <input type="text" id="site-name" placeholder="e.g., My Custom Site" class="input-base" x-model="customName">
+                                </div>
+                                <div class="flex-1 mb-5">
+                                    <label for="site-pattern" class="block mb-2 font-medium">Extractor Pattern</label>
+                                    <input type="text" id="site-pattern" placeholder="e.g., customsite" class="input-base" x-model="customPattern">
+                                    <small class="block mt-1 text-muted text-sm">The yt-dlp extractor name to match</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-5 flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="proxyStreaming">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Streaming</label>
+                                <small class="block text-muted text-sm">Stream video through server instead of directly from the site</small>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between items-center mb-4 pb-4 border-b border-border mt-8">
+                            <h3 class="text-lg font-semibold">Credentials</h3>
+                            <div class="relative" @click.outside="credentialDropdownOpen = false">
+                                <button type="button" class="btn-sm-secondary" @click="credentialDropdownOpen = !credentialDropdownOpen">+ Add</button>
+                                <div x-show="credentialDropdownOpen" x-cloak x-transition
+                                     class="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg min-w-[300px] max-h-[400px] overflow-y-auto z-[1000] shadow-lg">
+                                    <template x-for="type in $store.app.credentialTypes" :key="type.value">
+                                        <div class="px-4 py-3 cursor-pointer border-b border-border last:border-b-0 transition-colors hover:bg-bg"
+                                             @click="addCredential(type.value)"
+                                             x-text="type.label">
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="credentials-container" class="mt-4">
+                            <!-- Empty state -->
+                            <template x-if="credentials.length === 0">
+                                <div class="text-center py-10 px-5 text-muted">
+                                    <p>No credentials added</p>
+                                </div>
+                            </template>
+
+                            <!-- Credentials list -->
+                            <template x-for="(cred, index) in credentials" :key="index">
+                                <div class="bg-bg border border-border rounded-md p-3 mb-2.5 flex flex-col">
+                                    <div class="flex justify-between mb-1">
+                                        <div class="font-medium" x-text="getCredentialType(cred.credential_type).label"></div>
+                                        <button type="button" class="btn-sm-danger" @click="removeCredential(index)">Remove</button>
+                                    </div>
+                                    <template x-if="getCredentialType(cred.credential_type).description">
+                                        <div class="text-sm text-muted mb-3 leading-relaxed" x-html="getCredentialType(cred.credential_type).description"></div>
+                                    </template>
+
+                                    <!-- Textarea type -->
+                                    <template x-if="getCredentialType(cred.credential_type).isTextarea">
+                                        <div>
+                                            <template x-if="cred.hasExisting">
+                                                <div class="text-sm text-green-400 mb-2">Existing value saved. Leave empty to keep it, or paste new content to replace.</div>
+                                            </template>
+                                            <textarea x-model="cred.value"
+                                                      class="input-base min-h-[100px] resize-y font-mono"
+                                                      :placeholder="cred.hasExisting ? '(Leave empty to keep existing)' : 'Paste content here...'"
+                                                      rows="3"></textarea>
+                                        </div>
+                                    </template>
+
+                                    <!-- Username/Password type -->
+                                    <template x-if="getCredentialType(cred.credential_type).hasUsernamePassword">
+                                        <div class="flex gap-4">
+                                            <div class="flex-1 mb-5">
+                                                <label class="block mb-2 font-medium">Username</label>
+                                                <input type="text" x-model="cred.key" class="input-base"
+                                                       :placeholder="cred.hasExisting ? '(Keep existing)' : 'Enter username'">
+                                            </div>
+                                            <div class="flex-1 mb-5">
+                                                <label class="block mb-2 font-medium">Password</label>
+                                                <input type="password" x-model="cred.value" class="input-base"
+                                                       :placeholder="cred.hasExisting ? '(Keep existing)' : 'Enter password'">
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Default text/password input -->
+                                    <template x-if="!getCredentialType(cred.credential_type).isTextarea && !getCredentialType(cred.credential_type).hasUsernamePassword && !getCredentialType(cred.credential_type).isFlag">
+                                        <input :type="getCredentialType(cred.credential_type).isPassword ? 'password' : 'text'"
+                                               x-model="cred.value"
+                                               class="input-base"
+                                               :placeholder="cred.hasExisting ? '(Keep existing)' : 'Enter value'">
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div class="flex justify-end gap-2.5 mt-8 pt-5 border-t border-border">
+                            <button type="button" class="btn-secondary" @click="hideForm()">Cancel</button>
+                            <button type="submit" class="btn-primary">Save Site</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Tab -->
+        <div x-show="$store.tabs.activeTab === 'users'" x-data="usersManager" @tab-changed.window="$event.detail === 'users' && loadUsers()">
+            <div class="bg-card rounded-lg p-5 mb-5 border border-border">
+                <div class="flex justify-between items-center mb-4 pb-4 border-b border-border">
+                    <h2 class="text-xl font-semibold">Users</h2>
+                    <button class="btn-sm-primary" @click="openAddModal()">+ Add User</button>
+                </div>
+                <div id="users-list" class="flex flex-col gap-4">
+                    <!-- Loading -->
+                    <template x-if="loading">
+                        <div class="flex justify-center items-center py-10">
+                            <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin"></div>
+                        </div>
+                    </template>
+
+                    <!-- Empty state -->
+                    <template x-if="!loading && users.length === 0">
+                        <div class="text-center py-10 px-5 text-muted">
+                            <h3 class="mb-2 text-text font-medium">No users</h3>
+                            <p>Add a user to enable admin access</p>
+                        </div>
+                    </template>
+
+                    <!-- Users list -->
+                    <template x-for="user in users" :key="user.id">
+                        <div class="bg-bg border border-border rounded-lg px-5 py-4 flex justify-between items-center">
+                            <div>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <h3 class="text-lg font-medium" x-text="user.username"></h3>
+                                    <template x-if="user.is_admin">
+                                        <span class="px-2 py-0.5 bg-primary/20 text-primary text-xs rounded">Admin</span>
+                                    </template>
+                                </div>
+                                <div class="text-muted text-sm">
+                                    Last login: <span x-text="user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'"></span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2.5 items-center">
+                                <button class="btn-sm-secondary" @click="openEditModal(user.id)">Edit</button>
+                                <button class="btn-sm-danger" @click="deleteUser(user.id)">Delete</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- User Modal -->
+            <div x-show="modalOpen" x-cloak
+                 class="fixed inset-0 bg-black/70 flex justify-center items-center z-[1000] transition-all duration-300"
+                 @click.self="closeModal()">
+                <div class="bg-card rounded-xl w-[90%] max-w-xl max-h-[90vh] overflow-y-auto" x-transition>
+                    <div class="p-5 border-b border-border flex justify-between items-center">
+                        <h2 class="text-xl font-semibold" x-text="modalTitle"></h2>
+                        <button class="bg-transparent border-none text-muted text-2xl cursor-pointer p-1 leading-none hover:text-text" @click="closeModal()">&times;</button>
+                    </div>
+                    <div class="p-5">
+                        <form @submit.prevent="saveUser()">
+                            <div class="mb-5">
+                                <label for="user-username" class="block mb-2 font-medium">Username</label>
+                                <input type="text" id="user-username" required minlength="3" class="input-base"
+                                       x-model="username" :disabled="isEditing">
+                            </div>
+
+                            <div class="mb-5">
+                                <label for="user-password" class="block mb-2 font-medium">Password</label>
+                                <input type="password" id="user-password" minlength="6" class="input-base"
+                                       x-model="password" :required="!isEditing">
+                                <small class="block mt-1 text-muted text-sm" x-text="passwordHint"></small>
+                            </div>
+
+                            <div class="mb-5 flex items-center gap-3">
+                                <label class="toggle">
+                                    <input type="checkbox" x-model="isAdmin">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <label class="font-medium cursor-pointer">Admin privileges</label>
+                                    <small class="block text-muted text-sm">Allow access to server management</small>
+                                </div>
+                            </div>
+
+                            <div class="pt-4 border-t border-border flex justify-end gap-2.5">
+                                <button type="button" class="btn-secondary" @click="closeModal()">Cancel</button>
+                                <button type="submit" class="btn-primary">Save</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Watched Channels Tab -->
+        <div x-show="$store.tabs.activeTab === 'watched-channels'" x-data="watchedChannelsManager" @tab-changed.window="$event.detail === 'watched-channels' && loadChannels()">
+            <div class="bg-card rounded-lg p-5 mb-5 border border-border">
+                <div class="flex justify-between items-center mb-4 pb-4 border-b border-border">
+                    <h2 class="text-xl font-semibold">Watched Channels</h2>
+                    <div class="flex items-center gap-4">
+                        <span class="text-muted text-sm" x-show="channels.length > 0" x-text="`${channels.length} channel${channels.length !== 1 ? 's' : ''} being prefetched`"></span>
+                        <button 
+                            class="btn-sm-primary flex items-center gap-2"
+                            @click="refreshAll()"
+                            :disabled="refreshing"
+                            :class="{ 'opacity-50 cursor-not-allowed': refreshing }"
+                            x-show="channels.length > 0">
+                            <template x-if="refreshing">
+                                <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            </template>
+                            <span x-text="refreshing ? 'Refreshing...' : 'Refresh All'"></span>
+                        </button>
+                    </div>
+                </div>
+                <div id="watched-channels-list" class="flex flex-col gap-3">
+                    <!-- Loading -->
+                    <template x-if="loading">
+                        <div class="flex justify-center items-center py-10">
+                            <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin"></div>
+                        </div>
+                    </template>
+
+                    <!-- Empty state -->
+                    <template x-if="!loading && channels.length === 0">
+                        <div class="text-center py-10 px-5 text-muted">
+                            <h3 class="mb-2 text-text font-medium">No watched channels</h3>
+                            <p>Channels will appear here when clients request feeds</p>
+                        </div>
+                    </template>
+
+                    <!-- Channels list -->
+                    <template x-for="ch in channels" :key="ch.channel_id + ch.site">
+                        <div class="bg-bg border border-border rounded-lg px-4 py-3 flex items-center gap-4">
+                            <div class="flex items-center gap-3 min-w-0 flex-1">
+                                <template x-if="ch.avatar_url">
+                                    <img :src="ch.avatar_url" alt="" class="w-10 h-10 rounded-full object-cover flex-shrink-0">
+                                </template>
+                                <template x-if="!ch.avatar_url">
+                                    <div class="w-10 h-10 rounded-full bg-border flex items-center justify-center flex-shrink-0 text-muted text-sm"
+                                         x-text="(ch.channel_name || ch.channel_id).charAt(0).toUpperCase()"></div>
+                                </template>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2 mb-0.5">
+                                        <a :href="ch.channel_url" target="_blank" class="font-medium hover:text-primary truncate" x-text="ch.channel_name || ch.channel_id"></a>
+                                        <span class="px-2 py-0.5 bg-border text-muted text-xs rounded flex-shrink-0" x-text="ch.site"></span>
+                                    </div>
+                                    <div class="text-muted text-xs">
+                                        Last requested: <span x-text="formatTimeAgo(ch.last_requested)"></span>
+                                        <template x-if="ch.last_fetch">
+                                            <span> · Last fetch: <span x-text="formatTimeAgo(ch.last_fetch)"></span></span>
+                                        </template>
+                                        <template x-if="!ch.last_fetch">
+                                            <span> · Not fetched yet</span>
+                                        </template>
+                                        <template x-if="ch.fetch_error">
+                                            <span> · <span class="text-red-400" :title="ch.fetch_error">Error</span></span>
+                                        </template>
+                                        <!-- Video stats -->
+                                        <span> · Total fetched videos: <span x-text="ch.video_count || 0"></span></span>
+                                        <template x-if="ch.last_video_published && ch.last_video_title">
+                                            <span>, Last video: <span x-text="formatTimeAgo(ch.last_video_published)"></span> "<span x-text="(ch.last_video_title.length > 50 ? ch.last_video_title.substring(0, 50) + '...' : ch.last_video_title)" class="italic"></span>"</span>
+                                        </template>
+                                        <template x-if="(!ch.last_video_published || !ch.last_video_title) && (ch.video_count === 0)">
+                                            <span>, Last video: No videos</span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div x-show="$store.tabs.activeTab === 'settings'" x-data="settingsManager" @tab-changed.window="$event.detail === 'settings' && loadSettings()">
+            <!-- Loading -->
+            <template x-if="loading">
+                <div class="flex justify-center items-center py-10">
+                    <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin"></div>
+                </div>
+            </template>
+
+            <div x-show="!loading" class="bg-card rounded-lg p-5 mb-5 border border-border">
+                <div class="flex justify-between items-center mb-4 pb-4 border-b border-border">
+                    <h2 class="text-xl font-semibold">Server Settings</h2>
+                    <button class="btn-sm-primary" @click="saveSettings()">Save Changes</button>
+                </div>
+
+                <!-- Security Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Security</h3>
+                    <div class="flex items-center gap-3">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="allow_all_sites_for_extraction">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div>
+                            <label class="font-medium cursor-pointer">Allow All Sites for Extraction</label>
+                            <small class="block text-muted text-sm">Allow extracting videos from any site yt-dlp supports. When disabled, only sites configured in the Sites tab are allowed.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Invidious Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Invidious Proxy</h3>
+                    <div class="flex items-center gap-3 mb-4">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="invidious_enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div>
+                            <label class="font-medium cursor-pointer">Enable Invidious Proxy</label>
+                            <small class="block text-muted text-sm">Master toggle — disables all Invidious features when off</small>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="invidious-instance" class="block mb-2 font-medium">Instance URL</label>
+                        <input type="url" id="invidious-instance" placeholder="https://invidious.example.com" class="input-base" x-model="invidious_instance">
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_videos">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Video Requests</label>
+                                <small class="block text-muted text-sm">Use Invidious for video info (faster, but fewer formats)</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_channels">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Channel Requests</label>
+                                <small class="block text-muted text-sm">Use Invidious for channel info (faster, includes upload dates)</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_channel_tabs">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Channel Tabs</label>
+                                <small class="block text-muted text-sm">Use Invidious for playlists, shorts, streams tabs</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_playlists">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Playlist Requests</label>
+                                <small class="block text-muted text-sm">Use Invidious for playlist details (faster, includes descriptions)</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_captions">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Captions</label>
+                                <small class="block text-muted text-sm">Use Invidious for video captions (bypass Google blocking)</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_proxy_thumbnails">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Proxy Thumbnails</label>
+                                <small class="block text-muted text-sm">Rewrite thumbnail URLs to proxy through this server</small>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="invidious_author_thumbnails">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Fetch Author Thumbnails</label>
+                                <small class="block text-muted text-sm">Get channel avatars from Invidious (adds latency)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                        <div>
+                            <label for="invidious-timeout" class="block mb-2 font-medium">Timeout (seconds)</label>
+                            <input type="number" id="invidious-timeout" min="5" max="60" class="input-base" x-model.number="invidious_timeout">
+                        </div>
+                        <div>
+                            <label for="invidious-max-retries" class="block mb-2 font-medium">Max Retries</label>
+                            <input type="number" id="invidious-max-retries" min="1" max="10" class="input-base" x-model.number="invidious_max_retries">
+                        </div>
+                        <div>
+                            <label for="invidious-retry-delay" class="block mb-2 font-medium">Retry Delay (seconds)</label>
+                            <input type="number" id="invidious-retry-delay" min="0.5" max="30" step="0.5" class="input-base" x-model.number="invidious_retry_delay">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feed Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Feed Fetcher</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="feed-fetch-interval" class="block mb-2 font-medium">Fetch Interval (minutes)</label>
+                            <input type="number" id="feed-fetch-interval" min="5" max="1440" class="input-base" x-model.number="feed_fetch_interval_minutes">
+                            <small class="block mt-1 text-muted text-sm">Default: 30</small>
+                        </div>
+                        <div>
+                            <label for="feed-channel-delay" class="block mb-2 font-medium">Channel Delay (seconds)</label>
+                            <input type="number" id="feed-channel-delay" min="1" max="30" class="input-base" x-model.number="feed_channel_delay">
+                            <small class="block mt-1 text-muted text-sm">Delay between channel fetches</small>
+                        </div>
+                        <div>
+                            <label for="feed-max-videos" class="block mb-2 font-medium">Max Videos per Channel</label>
+                            <input type="number" id="feed-max-videos" min="10" max="100" class="input-base" x-model.number="feed_max_videos">
+                            <small class="block mt-1 text-muted text-sm">Videos cached per channel</small>
+                        </div>
+                        <div>
+                            <label for="feed-video-max-age" class="block mb-2 font-medium">Video Max Age (days)</label>
+                            <input type="number" id="feed-video-max-age" min="1" max="365" class="input-base" x-model.number="feed_video_max_age">
+                            <small class="block mt-1 text-muted text-sm">Days before cleanup</small>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="feed_ytdlp_use_flat_playlist">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Use yt-dlp Flat Playlist Mode</label>
+                                <small class="block text-muted text-sm">Enable faster yt-dlp fetching without extra details like publish dates (only affects fallback when Invidious is unavailable)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="feed_fallback_ytdlp_on_414">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Fallback to yt-dlp on 414 Errors</label>
+                                <small class="block text-muted text-sm">Automatically use yt-dlp when Invidious hits 414 pagination errors (allows fetching 100+ videos instead of ~60)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <div class="flex items-center gap-3">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="feed_fallback_ytdlp_on_error">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Fallback to yt-dlp on Invidious Errors</label>
+                                <small class="block text-muted text-sm">Automatically use yt-dlp when Invidious fails after retries (500, 502, etc.)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search & Other Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Other Settings</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="default-search-results" class="block mb-2 font-medium">Default Search Results</label>
+                            <input type="number" id="default-search-results" min="5" max="50" class="input-base" x-model.number="default_search_results">
+                        </div>
+                        <div>
+                            <label for="max-search-results" class="block mb-2 font-medium">Max Search Results</label>
+                            <input type="number" id="max-search-results" min="10" max="100" class="input-base" x-model.number="max_search_results">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- yt-dlp Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">yt-dlp Configuration</h3>
+                    <div>
+                        <label for="ytdlp-path" class="block mb-2 font-medium">yt-dlp Path</label>
+                        <input type="text" id="ytdlp-path" class="input-base" x-model="ytdlp_path">
+                        <small class="block mt-1 text-muted text-sm">Path to yt-dlp executable</small>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                            <label for="ytdlp-timeout" class="block mb-2 font-medium">Timeout (seconds)</label>
+                            <input type="number" id="ytdlp-timeout" min="10" max="600" class="input-base" x-model.number="ytdlp_timeout">
+                            <small class="block mt-1 text-muted text-sm">Max time for yt-dlp operations</small>
+                        </div>
+                        <div>
+                            <label for="proxy-download-max-age" class="block mb-2 font-medium">Download Retention (hours)</label>
+                            <input type="number" id="proxy-download-max-age" min="1" max="168" class="input-base" x-model.number="proxy_download_max_age_hours">
+                            <small class="block mt-1 text-muted text-sm">How long to keep fast downloads (Default: 24)</small>
+                        </div>
+                        <div>
+                            <label for="proxy-max-downloads" class="block mb-2 font-medium">Max Concurrent Downloads</label>
+                            <input type="number" id="proxy-max-downloads" min="1" max="20" class="input-base" x-model.number="proxy_max_concurrent_downloads">
+                            <small class="block mt-1 text-muted text-sm">Concurrent fast download limit (requires restart, Default: 3)</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rate Limiting Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Rate Limiting</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="rate-limit-window" class="block mb-2 font-medium">Window (seconds)</label>
+                            <input type="number" id="rate-limit-window" min="10" max="600" class="input-base" x-model.number="rate_limit_window">
+                            <small class="block mt-1 text-muted text-sm">Time window for tracking failed login attempts (Default: 60)</small>
+                        </div>
+                        <div>
+                            <label for="rate-limit-max-failures" class="block mb-2 font-medium">Max Failures</label>
+                            <input type="number" id="rate-limit-max-failures" min="1" max="100" class="input-base" x-model.number="rate_limit_max_failures">
+                            <small class="block mt-1 text-muted text-sm">Max failed login attempts before lockout (Default: 5)</small>
+                        </div>
+                        <div>
+                            <label for="rate-limit-cleanup" class="block mb-2 font-medium">Cleanup Interval (minutes)</label>
+                            <input type="number" id="rate-limit-cleanup" min="1" max="60" class="input-base" x-model.number="rate_limit_cleanup_interval_minutes">
+                            <small class="block mt-1 text-muted text-sm">How often stale rate-limit entries are purged (Default: 5)</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cache Section -->
+                <div class="mb-4">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Cache TTL (seconds)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label for="cache-video-ttl" class="block mb-2 font-medium">Video Metadata</label>
+                            <input type="number" id="cache-video-ttl" min="60" max="86400" class="input-base" x-model.number="cache_video_ttl">
+                            <small class="block mt-1 text-muted text-sm">Default: 3600 (1 hour)</small>
+                        </div>
+                        <div>
+                            <label for="cache-extract-ttl" class="block mb-2 font-medium">Extract Cache</label>
+                            <input type="number" id="cache-extract-ttl" min="60" max="7200" class="input-base" x-model.number="cache_extract_ttl">
+                            <small class="block mt-1 text-muted text-sm">Default: 900 (15 min)</small>
+                        </div>
+                        <div>
+                            <label for="cache-search-ttl" class="block mb-2 font-medium">Search Results</label>
+                            <input type="number" id="cache-search-ttl" min="60" max="7200" class="input-base" x-model.number="cache_search_ttl">
+                            <small class="block mt-1 text-muted text-sm">Default: 900 (15 min)</small>
+                        </div>
+                        <div>
+                            <label for="cache-channel-ttl" class="block mb-2 font-medium">Channel Info</label>
+                            <input type="number" id="cache-channel-ttl" min="60" max="86400" class="input-base" x-model.number="cache_channel_ttl">
+                            <small class="block mt-1 text-muted text-sm">Default: 1800 (30 min)</small>
+                        </div>
+                        <div>
+                            <label for="cache-avatar-ttl" class="block mb-2 font-medium">Channel Avatars</label>
+                            <input type="number" id="cache-avatar-ttl" min="3600" max="604800" class="input-base" x-model.number="cache_avatar_ttl">
+                            <small class="block mt-1 text-muted text-sm">Default: 86400 (24 hours)</small>
+                        </div>
+                        <div>
+                            <label for="dns-cache-ttl" class="block mb-2 font-medium">DNS Cache TTL</label>
+                            <input type="number" id="dns-cache-ttl" min="5" max="3600" class="input-base" x-model.number="dns_cache_ttl">
+                            <small class="block mt-1 text-muted text-sm">How long DNS lookups are cached (Default: 30)</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom Save -->
+                <div class="flex justify-end pt-4 mt-4 border-t border-border">
+                    <button class="btn-sm-primary" @click="saveSettings()">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="fixed top-5 right-5 z-[2000] flex flex-col gap-2.5" x-data>
+        <template x-for="toast in $store.toast.items" :key="toast.id">
+            <div class="bg-card border border-border rounded-lg px-5 py-4 min-w-[300px] flex items-center gap-3 animate-slide-in"
+                 :class="{
+                     'border-l-4 border-l-green-400': toast.type === 'success',
+                     'border-l-4 border-l-red-500': toast.type === 'error',
+                     'border-l-4 border-l-amber-500': toast.type === 'warning'
+                 }"
+                 x-text="toast.message">
+            </div>
+        </template>
+    </div>
+
+    <!-- Test Modal -->
+    <div x-data="testModal" @open-test-modal.window="openForSite($event.detail.siteId)">
+        <div x-show="open" x-cloak
+             class="fixed inset-0 bg-black/70 flex justify-center items-center z-[1000] transition-all duration-300"
+             @click.self="close()">
+            <div class="bg-card rounded-xl w-[90%] max-w-xl max-h-[90vh] overflow-y-auto" x-transition>
+                <div class="p-5 border-b border-border flex justify-between items-center">
+                    <h2 class="text-xl font-semibold">Test Credentials</h2>
+                    <button class="bg-transparent border-none text-muted text-2xl cursor-pointer p-1 leading-none hover:text-text" @click="close()">&times;</button>
+                </div>
+                <div class="p-5">
+                    <div class="mb-5">
+                        <label for="test-url" class="block mb-2 font-medium">Test URL</label>
+                        <input type="url" id="test-url" required class="input-base"
+                               x-model="testUrl" :placeholder="placeholder">
+                        <small class="block mt-1 text-muted text-sm">Enter a URL to test extraction with these credentials</small>
+                    </div>
+                    <div x-show="result" class="mt-5">
+                        <template x-if="result?.success">
+                            <div class="text-green-400">
+                                <strong>Success!</strong><br>
+                                Extractor: <span x-text="result.extractor || 'N/A'"></span><br>
+                                Title: <span x-text="result.title || 'N/A'"></span>
+                            </div>
+                        </template>
+                        <template x-if="result && !result.success">
+                            <div class="text-red-500">
+                                <strong>Failed</strong><br>
+                                <span x-text="result.message"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-border flex justify-end gap-2.5">
+                    <button type="button" class="btn-secondary" @click="close()">Close</button>
+                    <button type="button" class="btn-primary" @click="runTest()" :disabled="testing" x-text="testing ? 'Testing...' : 'Test'"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alpine stores and components -->
+    <script src="/static/js/alpine/stores/utils.js"></script>
+    <script src="/static/js/alpine/stores/api.js"></script>
+    <script src="/static/js/alpine/stores/toast.js"></script>
+    <script src="/static/js/alpine/stores/app.js"></script>
+    <script src="/static/js/alpine/components/tabs.js"></script>
+    <script src="/static/js/alpine/components/sites.js"></script>
+    <script src="/static/js/alpine/components/users.js"></script>
+    <script src="/static/js/alpine/components/watched-channels.js"></script>
+    <script src="/static/js/alpine/components/settings.js"></script>
+    <script src="/static/js/alpine/components/testModal.js"></script>
+    <!-- Alpine.js -->
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script>
+        function toggleTheme(){var d=document.documentElement;if(d.getAttribute('data-theme')==='dark'){d.removeAttribute('data-theme');localStorage.removeItem('theme')}else{d.setAttribute('data-theme','dark');localStorage.setItem('theme','dark')}}
+    </script>
+    <style>.theme-icon-moon{display:none}[data-theme="dark"] .theme-icon-sun{display:none}[data-theme="dark"] .theme-icon-moon{display:block}</style>
+</body>
+</html>

@@ -1,0 +1,189 @@
+{
+  "type": "video",
+  "title": "Rick Astley - Never Gonna Give You Up (Official Music Video)",
+  "videoId": "dQw4w9WgXcQ",
+  "videoThumbnails": [
+    {
+      "quality": "maxres",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/maxres.jpg",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "quality": "maxresdefault",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "quality": "sddefault",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/sddefault.jpg",
+      "width": 640,
+      "height": 480
+    },
+    {
+      "quality": "high",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "width": 480,
+      "height": 360
+    },
+    {
+      "quality": "medium",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+      "width": 320,
+      "height": 180
+    },
+    {
+      "quality": "default",
+      "url": "https://invidious.example.com/vi/dQw4w9WgXcQ/default.jpg",
+      "width": 120,
+      "height": 90
+    }
+  ],
+  "storyboards": [],
+  "description": "The official music video for Rick Astley's \"Never Gonna Give You Up\"",
+  "descriptionHtml": "<p>The official music video for Rick Astley's \"Never Gonna Give You Up\"</p>",
+  "published": 1256428800,
+  "publishedText": "15 years ago",
+  "keywords": ["rick astley", "never gonna give you up"],
+  "viewCount": 1500000000,
+  "likeCount": 15000000,
+  "dislikeCount": 0,
+  "paid": false,
+  "premium": false,
+  "isFamilyFriendly": true,
+  "allowedRegions": ["US", "GB", "CA"],
+  "genre": "Music",
+  "genreUrl": "/channel/UC-9-kyTW8ZkZNDHQJ6FgpwQ",
+  "author": "Rick Astley",
+  "authorId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "authorUrl": "/channel/UCuAXFkgsw1L7xaCfnd5JJOw",
+  "authorThumbnails": [
+    {
+      "url": "https://yt3.ggpht.com/ytc/author_thumbnail.jpg",
+      "width": 48,
+      "height": 48
+    }
+  ],
+  "subCountText": "4.2M subscribers",
+  "lengthSeconds": 212,
+  "allowRatings": true,
+  "rating": 4.9,
+  "isListed": true,
+  "liveNow": false,
+  "isUpcoming": false,
+  "hlsUrl": null,
+  "adaptiveFormats": [
+    {
+      "init": "0-740",
+      "index": "741-1564",
+      "bitrate": "4405304",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?itag=137",
+      "itag": "137",
+      "type": "video/mp4; codecs=\"avc1.640028\"",
+      "clen": "116753155",
+      "lmt": "1687369517789361",
+      "projectionType": "RECTANGULAR",
+      "container": "mp4",
+      "encoding": "avc1",
+      "qualityLabel": "1080p",
+      "resolution": "1920x1080",
+      "fps": 30
+    },
+    {
+      "init": "0-740",
+      "index": "741-1564",
+      "bitrate": "2073494",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?itag=136",
+      "itag": "136",
+      "type": "video/mp4; codecs=\"avc1.64001f\"",
+      "clen": "54988987",
+      "lmt": "1687369517794896",
+      "projectionType": "RECTANGULAR",
+      "container": "mp4",
+      "encoding": "avc1",
+      "qualityLabel": "720p",
+      "resolution": "1280x720",
+      "fps": 30
+    },
+    {
+      "init": "0-591",
+      "index": "592-1131",
+      "bitrate": "130785",
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?itag=140",
+      "itag": "140",
+      "type": "audio/mp4; codecs=\"mp4a.40.2\"",
+      "clen": "3434852",
+      "lmt": "1687369517846916",
+      "projectionType": "RECTANGULAR",
+      "container": "m4a",
+      "encoding": "aac",
+      "audioQuality": "AUDIO_QUALITY_MEDIUM",
+      "audioSampleRate": 44100,
+      "audioChannels": 2
+    }
+  ],
+  "formatStreams": [
+    {
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?itag=18",
+      "itag": "18",
+      "type": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+      "quality": "medium",
+      "bitrate": "500000",
+      "fps": 30,
+      "size": "640x360",
+      "container": "mp4",
+      "encoding": "avc1",
+      "qualityLabel": "360p",
+      "resolution": "360p"
+    },
+    {
+      "url": "https://rr3---sn.googlevideo.com/videoplayback?itag=22",
+      "itag": "22",
+      "type": "video/mp4; codecs=\"avc1.64001F, mp4a.40.2\"",
+      "quality": "hd720",
+      "bitrate": "2500000",
+      "fps": 30,
+      "size": "1280x720",
+      "container": "mp4",
+      "encoding": "avc1",
+      "qualityLabel": "720p",
+      "resolution": "720p"
+    }
+  ],
+  "captions": [
+    {
+      "label": "English",
+      "language_code": "en",
+      "url": "/api/v1/captions/dQw4w9WgXcQ?label=English"
+    },
+    {
+      "label": "English (auto-generated)",
+      "language_code": "en",
+      "url": "/api/v1/captions/dQw4w9WgXcQ?label=English%20%28auto-generated%29"
+    },
+    {
+      "label": "Spanish",
+      "language_code": "es",
+      "url": "/api/v1/captions/dQw4w9WgXcQ?label=Spanish"
+    }
+  ],
+  "recommendedVideos": [
+    {
+      "videoId": "yPYZpwSpKmA",
+      "title": "Rick Astley - Together Forever",
+      "videoThumbnails": [
+        {
+          "quality": "medium",
+          "url": "https://invidious.example.com/vi/yPYZpwSpKmA/mqdefault.jpg",
+          "width": 320,
+          "height": 180
+        }
+      ],
+      "author": "Rick Astley",
+      "authorId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+      "lengthSeconds": 203,
+      "viewCountText": "200M views"
+    }
+  ]
+}

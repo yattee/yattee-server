@@ -1,0 +1,21 @@
+services:
+  yattee-server:
+    build: .
+    container_name: yattee-server
+    ports:
+      - "8085:8085"
+    volumes:
+      - downloads:/downloads
+      - data:/app/data
+    env_file:
+      - .env
+    # Optional: auto-provisioning env vars (can also be set in .env file)
+    # environment:
+    #   - ADMIN_USERNAME=admin
+    #   - ADMIN_PASSWORD=changeme
+    #   - INVIDIOUS_INSTANCE_URL=https://invidious.example.com
+    restart: unless-stopped
+
+volumes:
+  downloads:
+  data:

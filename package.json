@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "postinstall": "node scripts/copy-vendor.js"
+  },
+  "dependencies": {
+    "alpinejs": "3.14.3",
+    "video.js": "8.10.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.18",
+    "tailwindcss": "^4.1.18"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "title": "Rick Astley",
+  "uploader": "Rick Astley",
+  "uploader_id": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "uploader_url": "https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw",
+  "channel": "Rick Astley",
+  "channel_id": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "channel_url": "https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw",
+  "channel_follower_count": 4200000,
+  "description": "Official YouTube channel for Rick Astley",
+  "playlist_count": 15,
+  "view_count": 2500000000,
+  "thumbnails": [
+    {
+      "url": "https://yt3.ggpht.com/ytc/AIdro_nBJPBZJKPaXvQRYEYBYKB_avatar.jpg",
+      "width": 900,
+      "height": 900
+    }
+  ],
+  "extractor": "youtube:tab",
+  "extractor_key": "YoutubeTab",
+  "webpage_url": "https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw/videos",
+  "_type": "playlist",
+  "entries": [
+    {
+      "id": "dQw4w9WgXcQ",
+      "title": "Rick Astley - Never Gonna Give You Up",
+      "duration": 212,
+      "view_count": 1500000000,
+      "upload_date": "20091025",
+      "channel": "Rick Astley",
+      "channel_id": "UCuAXFkgsw1L7xaCfnd5JJOw"
+    },
+    {
+      "id": "yPYZpwSpKmA",
+      "title": "Rick Astley - Together Forever",
+      "duration": 203,
+      "view_count": 200000000,
+      "upload_date": "20091025",
+      "channel": "Rick Astley",
+      "channel_id": "UCuAXFkgsw1L7xaCfnd5JJOw"
+    }
+  ]
+}
