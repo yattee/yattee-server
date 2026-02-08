@@ -1,5 +1,12 @@
 # Yattee Server
 
+[![Build Status](https://github.com/yattee/yattee-server/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/yattee/yattee-server/actions/workflows/docker-publish.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/yattee/yattee-server)](https://hub.docker.com/r/yattee/yattee-server)
+[![Docker Image Size](https://img.shields.io/docker/image-size/yattee/yattee-server/latest)](https://hub.docker.com/r/yattee/yattee-server)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org)
+[![Platforms](https://img.shields.io/badge/Platforms-amd64%20%7C%20arm64-lightgrey.svg)]()
+
 A self-hosted API server powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) that manages data extraction fromYouTube and other video sites. Designed for use with [Yattee](https://github.com/yattee/yattee).
 
 ## Features
