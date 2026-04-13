@@ -236,6 +236,16 @@ async def _fetch_from_innertube(
         Tuple of (videos_list or None, channel_metadata or None)
     """
     try:
+        # Fetch channel info first to get channel name (videos on channel tab lack author info)
+        channel_info = None
+        channel_name = ""
+        try:
+            channel_info = await innertube.get_channel_info(channel_id)
+            if channel_info:
+                channel_name = channel_info.get("author", "")
+        except innertube.InnerTubeError:
+            pass
+
         all_videos = []
         continuation = None
         page_count = 0
@@ -248,6 +258,11 @@ async def _fetch_from_innertube(
                 break
 
             for v in data["videos"]:
+                # Fill in author/authorId if missing (channel tab videos don't include them)
+                if not v.get("author"):
+                    v["author"] = channel_name
+                if not v.get("authorId"):
+                    v["authorId"] = channel_id
                 all_videos.append(_process_innertube_video(v, channel_id))
 
             continuation = data.get("continuation")
@@ -260,8 +275,13 @@ async def _fetch_from_innertube(
         all_videos = all_videos[:max_videos]
         logger.info(f"[Feed] InnerTube: fetched {len(all_videos)} videos for {channel_id} ({page_count} pages)")
 
-        # Fetch channel metadata
-        channel_metadata = await _fetch_channel_metadata_innertube(channel_id)
+        # Build channel metadata from already-fetched channel info
+        channel_metadata = None
+        if channel_info:
+            channel_metadata = {
+                "subscriber_count": channel_info.get("subCount"),
+                "is_verified": channel_info.get("authorVerified", False),
+            }
 
         return all_videos, channel_metadata
 
