@@ -216,7 +216,7 @@ def get_watched_channels_with_status() -> List[Dict[str, Any]]:
                         FROM cached_videos cv2
                         WHERE cv2.channel_id = cv.channel_id
                           AND cv2.site = cv.site
-                        ORDER BY cv2.published DESC
+                        ORDER BY COALESCE(cv2.published, 0) DESC, cv2.id DESC
                         LIMIT 1) as last_video_title
                 FROM cached_videos cv
                 GROUP BY channel_id, site
@@ -377,8 +377,9 @@ def get_feed_for_channels(channel_ids: List[Dict[str, str]], limit: int = 50, of
             SELECT *
             FROM cached_videos
             WHERE (channel_id, site) IN ({placeholders})
-            ORDER BY published DESC
+            ORDER BY COALESCE(published, 0) DESC, id DESC
             LIMIT ? OFFSET ?
+
         """,
             params,
         )

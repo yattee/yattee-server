@@ -135,6 +135,42 @@ def _process_ytdlp_video(info: dict, channel_id: str) -> dict:
     }
 
 
+def _parse_relative_time(text: str) -> Optional[int]:
+    """Parse relative time text like '2 days ago' into an approximate Unix timestamp.
+
+    Returns None if the text can't be parsed.
+    """
+    import re
+    import time
+
+    if not text:
+        return None
+
+    text = text.lower().strip()
+    match = re.match(r"(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", text)
+    if not match:
+        # Handle "Streamed X ago" format
+        match = re.match(r"streamed\s+(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", text)
+    if not match:
+        return None
+
+    num = int(match.group(1))
+    unit = match.group(2)
+
+    multipliers = {
+        "second": 1,
+        "minute": 60,
+        "hour": 3600,
+        "day": 86400,
+        "week": 604800,
+        "month": 2592000,  # ~30 days
+        "year": 31536000,  # ~365 days
+    }
+
+    seconds_ago = num * multipliers.get(unit, 0)
+    return int(time.time()) - seconds_ago
+
+
 def _process_innertube_video(v: dict, channel_id: str) -> dict:
     """Convert an InnerTube video (Invidious-compatible format) to our cached format.
 
@@ -156,7 +192,7 @@ def _process_innertube_video(v: dict, channel_id: str) -> dict:
         "author_id": v.get("authorId", channel_id),
         "length_seconds": v.get("lengthSeconds", 0),
         "view_count": v.get("viewCount"),
-        "published": None,  # InnerTube doesn't provide Unix timestamps
+        "published": _parse_relative_time(v.get("publishedText", "")),
         "published_text": v.get("publishedText", ""),
         "thumbnail_url": best_thumb_url,
         "thumbnails": all_thumbnails,
