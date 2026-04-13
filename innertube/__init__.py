@@ -14,7 +14,7 @@ from innertube._browse import (
 )
 from innertube._client import InnerTubeError, get_client, innertube_get, innertube_post
 from innertube._comments import get_comments
-from innertube._search import search_channel
+from innertube._search import search, search_channel
 from innertube._suggestions import get_search_suggestions
 from innertube._thumbnails import proxy_thumbnail
 
@@ -42,5 +42,6 @@ __all__ = [
     "innertube_post",
     "is_enabled",
     "proxy_thumbnail",
+    "search",
     "search_channel",
 ]

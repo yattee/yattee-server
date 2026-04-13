@@ -173,11 +173,37 @@ class TestSearch:
         self.db_path = test_db
         self.client = test_client
 
-    def test_search_videos_success(self, sample_ytdlp_search_results):
-        """Test successful video search via yt-dlp."""
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = sample_ytdlp_search_results
+    def _mock_innertube_search_empty(self):
+        """Helper: mock InnerTube search to return empty so fallbacks are used."""
+        return patch("routers.search.innertube.search", new_callable=AsyncMock, return_value=[])
+
+    def _mock_innertube_search_fail(self):
+        """Helper: mock InnerTube search to raise error."""
+        from innertube import InnerTubeError
+
+        return patch("routers.search.innertube.search", new_callable=AsyncMock, side_effect=InnerTubeError("x"))
+
+    def test_search_videos_innertube_success(self):
+        """Test successful video search via InnerTube."""
+        innertube_results = [
+            {"type": "video", "videoId": "vid1xxxxxxx", "title": "InnerTube Result", "lengthSeconds": 300},
+        ]
+        with patch("routers.search.innertube.search", new_callable=AsyncMock) as mock_it:
+            mock_it.return_value = innertube_results
             response = self.client.get("/api/v1/search?q=test+query")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["videoId"] == "vid1xxxxxxx"
+
+    def test_search_videos_ytdlp_fallback(self, sample_ytdlp_search_results):
+        """Test video search falls back to yt-dlp when InnerTube returns empty."""
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_ytdlp_search_results
+                    response = self.client.get("/api/v1/search?q=test+query")
 
         assert response.status_code == 200
         data = response.json()
@@ -198,10 +224,12 @@ class TestSearch:
         assert "empty" in response.json()["detail"].lower()
 
     def test_search_with_sort_filter(self, sample_ytdlp_search_results):
-        """Test search with sort filter."""
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = sample_ytdlp_search_results
-            response = self.client.get("/api/v1/search?q=test&sort=date")
+        """Test search with sort filter falls through to yt-dlp."""
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_ytdlp_search_results
+                    response = self.client.get("/api/v1/search?q=test&sort=date")
 
         assert response.status_code == 200
         mock_search.assert_called_once()
@@ -210,9 +238,11 @@ class TestSearch:
 
     def test_search_with_date_filter(self, sample_ytdlp_search_results):
         """Test search with date filter."""
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = sample_ytdlp_search_results
-            response = self.client.get("/api/v1/search?q=test&date=week")
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_ytdlp_search_results
+                    response = self.client.get("/api/v1/search?q=test&date=week")
 
         assert response.status_code == 200
         call_kwargs = mock_search.call_args.kwargs
@@ -220,9 +250,11 @@ class TestSearch:
 
     def test_search_with_duration_filter(self, sample_ytdlp_search_results):
         """Test search with duration filter."""
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = sample_ytdlp_search_results
-            response = self.client.get("/api/v1/search?q=test&duration=long")
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_ytdlp_search_results
+                    response = self.client.get("/api/v1/search?q=test&duration=long")
 
         assert response.status_code == 200
         call_kwargs = mock_search.call_args.kwargs
@@ -230,9 +262,11 @@ class TestSearch:
 
     def test_search_with_all_filters(self, sample_ytdlp_search_results):
         """Test search with multiple filters."""
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = sample_ytdlp_search_results
-            response = self.client.get("/api/v1/search?q=music&sort=views&date=month&duration=medium")
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_ytdlp_search_results
+                    response = self.client.get("/api/v1/search?q=music&sort=views&date=month&duration=medium")
 
         assert response.status_code == 200
         call_kwargs = mock_search.call_args.kwargs
@@ -241,102 +275,137 @@ class TestSearch:
         assert call_kwargs.get("duration") == "medium"
 
     def test_search_pagination(self, sample_ytdlp_search_results):
-        """Test search pagination."""
-        # Create 25 results for pagination test
+        """Test search pagination via yt-dlp fallback (InnerTube returns empty for page > 1)."""
         many_results = sample_ytdlp_search_results * 9  # 27 results
 
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.return_value = many_results
-            with patch("routers.search.get_settings") as mock_settings:
-                mock_settings.return_value = MagicMock(default_search_results=10)
-                response = self.client.get("/api/v1/search?q=test&page=2")
+        # InnerTube returns [] for page > 1, so yt-dlp is used
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = many_results
+                    with patch("routers.search.get_settings") as mock_settings:
+                        mock_settings.return_value = MagicMock(default_search_results=10)
+                        response = self.client.get("/api/v1/search?q=test&page=2")
 
         assert response.status_code == 200
         data = response.json()
-        # Page 2 should have results 10-19
         assert len(data) == 10
 
-    def test_search_channel_requires_invidious(self):
-        """Test channel search requires Invidious proxy."""
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+    def test_search_channel_innertube_success(self):
+        """Test channel search via InnerTube."""
+        innertube_results = [
+            {"type": "channel", "authorId": "UCchannel1", "author": "First Channel"},
+            {"type": "channel", "authorId": "UCchannel2", "author": "Second Channel"},
+        ]
+        with patch("routers.search.innertube.search", new_callable=AsyncMock) as mock_it:
+            mock_it.return_value = innertube_results
             response = self.client.get("/api/v1/search?q=test&type=channel")
-
-        assert response.status_code == 501
-        assert "requires Invidious" in response.json()["detail"]
-
-    def test_search_channel_success(self, sample_invidious_channel_results):
-        """Test successful channel search via Invidious."""
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
-            with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
-                mock_search.return_value = sample_invidious_channel_results
-                with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
-                    response = self.client.get("/api/v1/search?q=test&type=channel")
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
         assert data[0]["authorId"] == "UCchannel1"
 
-    def test_search_playlist_requires_invidious(self):
-        """Test playlist search requires Invidious proxy."""
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
-            response = self.client.get("/api/v1/search?q=test&type=playlist")
+    def test_search_channel_invidious_fallback(self, sample_invidious_channel_results):
+        """Test channel search falls back to Invidious when InnerTube fails."""
+        with self._mock_innertube_search_fail():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
+                with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_invidious_channel_results
+                    with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
+                        response = self.client.get("/api/v1/search?q=test&type=channel")
 
-        assert response.status_code == 501
-        assert "requires Invidious" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        assert data[0]["authorId"] == "UCchannel1"
 
-    def test_search_playlist_success(self, sample_invidious_playlist_results):
-        """Test successful playlist search via Invidious."""
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
-            with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
-                mock_search.return_value = sample_invidious_playlist_results
-                with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
-                    response = self.client.get("/api/v1/search?q=test&type=playlist")
+    def test_search_channel_all_fail_returns_empty(self):
+        """Test channel search returns empty when all sources fail."""
+        with self._mock_innertube_search_fail():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                response = self.client.get("/api/v1/search?q=test&type=channel")
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_search_playlist_invidious_fallback(self, sample_invidious_playlist_results):
+        """Test successful playlist search via Invidious fallback."""
+        with self._mock_innertube_search_empty():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
+                with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = sample_invidious_playlist_results
+                    with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
+                        response = self.client.get("/api/v1/search?q=test&type=playlist")
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
         assert data[0]["playlistId"] == "PLabcdef123"
 
-    def test_search_all_types_mixed_results(self, sample_invidious_video_results, sample_invidious_channel_results):
-        """Test type=all returns mixed results."""
+    def test_search_all_types_innertube_mixed(self):
+        """Test type=all returns mixed results from InnerTube."""
         mixed_results = [
             {"type": "video", "videoId": "vid1", "title": "Video 1", "lengthSeconds": 100},
             {"type": "channel", "authorId": "UCch1", "author": "Channel 1"},
             {"type": "playlist", "playlistId": "PL1", "title": "Playlist 1", "videoCount": 10},
         ]
 
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
-            with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
-                mock_search.return_value = mixed_results
-                with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
-                    response = self.client.get("/api/v1/search?q=test&type=all")
+        with patch("routers.search.innertube.search", new_callable=AsyncMock) as mock_it:
+            mock_it.return_value = mixed_results
+            response = self.client.get("/api/v1/search?q=test&type=all")
 
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 3
 
-    def test_search_invidious_proxy_error(self):
-        """Test 502 error when Invidious proxy fails."""
-        from invidious_proxy import InvidiousProxyError
+    def test_search_all_types_invidious_fallback(self):
+        """Test type=all falls back to Invidious when InnerTube fails."""
+        mixed_results = [
+            {"type": "video", "videoId": "vid1", "title": "Video 1", "lengthSeconds": 100},
+            {"type": "channel", "authorId": "UCch1", "author": "Channel 1"},
+            {"type": "playlist", "playlistId": "PL1", "title": "Playlist 1", "videoCount": 10},
+        ]
 
-        with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
-            with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
-                mock_search.side_effect = InvidiousProxyError("Connection failed")
-                response = self.client.get("/api/v1/search?q=test&type=channel")
+        with self._mock_innertube_search_fail():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
+                with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_search:
+                    mock_search.return_value = mixed_results
+                    with patch("routers.search.invidious_proxy.get_base_url", return_value="https://inv.example.com"):
+                        response = self.client.get("/api/v1/search?q=test&type=all")
 
-        assert response.status_code == 502
-        assert "Invidious proxy error" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 3
 
-    def test_search_ytdlp_error(self):
-        """Test 500 error when yt-dlp fails."""
+    def test_search_graceful_fallthrough(self):
+        """Test all sources failing returns empty list, not error."""
         from ytdlp_wrapper import YtDlpError
 
-        with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_search:
-            mock_search.side_effect = YtDlpError("Search failed")
-            response = self.client.get("/api/v1/search?q=test")
+        with self._mock_innertube_search_fail():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=False):
+                with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_ytdlp:
+                    mock_ytdlp.side_effect = YtDlpError("failed")
+                    response = self.client.get("/api/v1/search?q=test&type=all")
 
-        assert response.status_code == 500
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_search_ytdlp_fallback_on_all_prior_failures(self, sample_ytdlp_search_results):
+        """Test yt-dlp is used as last resort for video/all searches."""
+        from invidious_proxy import InvidiousProxyError
+
+        with self._mock_innertube_search_fail():
+            with patch("routers.search.invidious_proxy.is_enabled", return_value=True):
+                with patch("routers.search.invidious_proxy.search", new_callable=AsyncMock) as mock_inv:
+                    mock_inv.side_effect = InvidiousProxyError("down")
+                    with patch("routers.search.search_videos", new_callable=AsyncMock) as mock_ytdlp:
+                        mock_ytdlp.return_value = sample_ytdlp_search_results
+                        response = self.client.get("/api/v1/search?q=test")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 3
 
 
 # =============================================================================

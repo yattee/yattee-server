@@ -1,16 +1,134 @@
-"""InnerTube search - channel search.
+"""InnerTube search - general and channel search.
 
-Uses YouTube's InnerTube resolve_url + browse endpoints to search within channels.
+Uses YouTube's InnerTube /search endpoint for general queries,
+and resolve_url + browse endpoints to search within channels.
 """
 
+import base64
 import logging
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from innertube._client import innertube_post
-from innertube._converters import video_renderer_to_invidious
+from innertube._converters import (
+    channel_renderer_to_invidious,
+    playlist_renderer_to_invidious,
+    video_renderer_to_invidious,
+)
 
 logger = logging.getLogger("innertube")
+
+
+SORT_MAP = {"date": 2, "views": 3, "rating": 4}
+DATE_MAP = {"hour": 1, "today": 2, "week": 3, "month": 4, "year": 5}
+DURATION_MAP = {"short": 1, "long": 2, "medium": 3}
+TYPE_MAP = {"video": 1, "channel": 2, "playlist": 3}
+
+
+def _build_search_params(
+    search_type: Optional[str] = None,
+    sort: Optional[str] = None,
+    date: Optional[str] = None,
+    duration: Optional[str] = None,
+) -> Optional[str]:
+    """Build base64-encoded protobuf params for InnerTube search endpoint.
+
+    Encodes sort order, upload date, duration, and result type filters.
+    Returns None if no filters are specified.
+    """
+    has_sort = sort and sort in SORT_MAP
+    has_date = date and date in DATE_MAP
+    has_duration = duration and duration in DURATION_MAP
+    has_type = search_type and search_type in TYPE_MAP
+
+    if not has_sort and not has_date and not has_duration and not has_type:
+        return None
+
+    data = bytearray()
+
+    # Field 1 (0x08): sort order
+    if has_sort:
+        data.extend([0x08, SORT_MAP[sort]])
+
+    # Field 2 (0x12): filters submessage
+    if has_date or has_duration or has_type:
+        filters = bytearray()
+        if has_date:
+            filters.extend([0x08, DATE_MAP[date]])
+        if has_type:
+            filters.extend([0x10, TYPE_MAP[search_type]])
+        if has_duration:
+            filters.extend([0x18, DURATION_MAP[duration]])
+
+        data.extend([0x12, len(filters)])
+        data.extend(filters)
+
+    return base64.b64encode(data).decode() if data else None
+
+
+def _parse_search_results(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Parse mixed search results from InnerTube search response."""
+    results = []
+
+    sections = (
+        data.get("contents", {})
+        .get("twoColumnSearchResultsRenderer", {})
+        .get("primaryContents", {})
+        .get("sectionListRenderer", {})
+        .get("contents", [])
+    )
+
+    for section in sections:
+        isr = section.get("itemSectionRenderer", {})
+        for item in isr.get("contents", []):
+            if "videoRenderer" in item:
+                results.append(video_renderer_to_invidious(item["videoRenderer"]))
+            elif "channelRenderer" in item:
+                results.append(channel_renderer_to_invidious(item["channelRenderer"]))
+            elif "playlistRenderer" in item:
+                results.append(playlist_renderer_to_invidious(item["playlistRenderer"]))
+            # Skip ads, promos, shelves, "did you mean", etc.
+
+    return results
+
+
+async def search(
+    query: str,
+    search_type: str = "all",
+    page: int = 1,
+    sort: Optional[str] = None,
+    date: Optional[str] = None,
+    duration: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Search YouTube via InnerTube.
+
+    Args:
+        query: Search query string
+        search_type: Result type - "video", "channel", "playlist", or "all"
+        page: Page number (only page 1 supported; returns empty for page > 1)
+        sort: Sort by - "relevance", "date", "views", "rating"
+        date: Upload date filter - "hour", "today", "week", "month", "year"
+        duration: Duration filter - "short", "medium", "long"
+
+    Returns:
+        List of result dicts in Invidious-compatible format
+    """
+    if page > 1:
+        # Continuation-based pagination not implemented yet;
+        # let the router fall through to Invidious/yt-dlp
+        return []
+
+    body: Dict[str, Any] = {"query": query}
+
+    params = _build_search_params(search_type=search_type, sort=sort, date=date, duration=duration)
+    if params:
+        body["params"] = params
+
+    data = await innertube_post("search", body)
+    results = _parse_search_results(data)
+
+    logger.info(f"[InnerTube] Search q={query} type={search_type}: {len(results)} results")
+    return results
 
 
 async def search_channel(
