@@ -94,7 +94,7 @@ async def search(
 @router.get("/search/suggestions", response_model=List[str])
 async def search_suggestions(q: str = Query(..., description="Search query")):
     """Get search suggestions. Tries InnerTube first, falls back to Invidious."""
-    # Try InnerTube first (no external dependency needed)
+    # Try InnerTube first
     try:
         suggestions = await innertube.get_search_suggestions(q)
         if suggestions:
@@ -115,7 +115,6 @@ async def search_suggestions(q: str = Query(..., description="Search query")):
 @router.get("/trending", response_model=List[VideoListItem])
 async def trending(region: str = Query("US", description="Region code")):
     """Get trending videos. Tries InnerTube first, falls back to Invidious."""
-    # Try InnerTube first
     try:
         results = await innertube.get_trending(region)
         if results:
@@ -138,7 +137,6 @@ async def trending(region: str = Query("US", description="Region code")):
 @router.get("/popular", response_model=List[VideoListItem])
 async def popular():
     """Get popular videos. Tries InnerTube first, falls back to Invidious."""
-    # Try InnerTube first
     try:
         results = await innertube.get_popular()
         if results:

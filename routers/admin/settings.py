@@ -44,6 +44,7 @@ class SettingsResponse(BaseModel):
     cache_extract_ttl: int
     default_search_results: int
     max_search_results: int
+    innertube_enabled: bool
     invidious_enabled: bool
     invidious_instance: Optional[str]
     invidious_timeout: int
@@ -82,6 +83,7 @@ class SettingsUpdate(BaseModel):
     cache_extract_ttl: Optional[int] = None
     default_search_results: Optional[int] = None
     max_search_results: Optional[int] = None
+    innertube_enabled: Optional[bool] = None
     invidious_enabled: Optional[bool] = None
     invidious_instance: Optional[str] = None
     invidious_timeout: Optional[int] = None

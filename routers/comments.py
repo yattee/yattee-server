@@ -56,10 +56,9 @@ async def get_comments(
         if data and data.get("comments"):
             logger.info(f"[Comments] InnerTube success for {video_id}: {len(data['comments'])} comments")
             return data
-        # If InnerTube returned empty, fall through to Invidious
         logger.debug(f"[Comments] InnerTube returned no comments for {video_id}, trying Invidious")
     except innertube.InnerTubeError as e:
-        logger.warning(f"[Comments] InnerTube error for {video_id}: {e}")
+        logger.debug(f"[Comments] InnerTube error for {video_id}: {e}")
 
     # Fall back to Invidious
     if invidious_proxy.is_enabled():

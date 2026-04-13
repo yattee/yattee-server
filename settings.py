@@ -28,6 +28,9 @@ class Settings(BaseModel):
     default_search_results: int = Field(default=20, ge=5, le=50)
     max_search_results: int = Field(default=50, ge=10, le=100)
 
+    # InnerTube (direct YouTube API)
+    innertube_enabled: bool = True
+
     # Invidious
     invidious_enabled: bool = True
     invidious_instance: Optional[str] = None

@@ -18,6 +18,14 @@ from innertube._search import search_channel
 from innertube._suggestions import get_search_suggestions
 from innertube._thumbnails import proxy_thumbnail
 
+
+def is_enabled() -> bool:
+    """Check if InnerTube is enabled in settings."""
+    from settings import get_settings
+
+    return get_settings().innertube_enabled
+
+
 __all__ = [
     "InnerTubeError",
     "get_channel_info",
@@ -32,6 +40,7 @@ __all__ = [
     "get_trending",
     "innertube_get",
     "innertube_post",
+    "is_enabled",
     "proxy_thumbnail",
     "search_channel",
 ]

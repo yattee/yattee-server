@@ -236,8 +236,13 @@ async def innertube_post(endpoint: str, body: Dict[str, Any], use_cookies: bool 
         Parsed JSON response
 
     Raises:
-        InnerTubeError: On API errors
+        InnerTubeError: If InnerTube is disabled or on API errors
     """
+    from settings import get_settings
+
+    if not get_settings().innertube_enabled:
+        raise InnerTubeError("InnerTube is disabled", is_retryable=False)
+
     client = await get_client()
     url = f"{INNERTUBE_API_URL}/{endpoint}?key={INNERTUBE_API_KEY}"
 
@@ -325,6 +330,11 @@ async def innertube_get(url: str, use_cookies: bool = True) -> httpx.Response:
 
     Returns the raw httpx.Response for flexible handling.
     """
+    from settings import get_settings
+
+    if not get_settings().innertube_enabled:
+        raise InnerTubeError("InnerTube is disabled", is_retryable=False)
+
     client = await get_client()
     headers = {}
 
