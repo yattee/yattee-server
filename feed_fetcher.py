@@ -11,6 +11,7 @@ import httpx
 
 import avatar_cache
 import database
+import innertube
 import invidious_proxy
 from converters import resolve_invidious_url
 from security import is_safe_url_strict
@@ -132,6 +133,108 @@ def _process_ytdlp_video(info: dict, channel_id: str) -> dict:
         "thumbnails": all_thumbnails,
         "video_url": info.get("url") or info.get("webpage_url") or "",
     }
+
+
+def _process_innertube_video(v: dict, channel_id: str) -> dict:
+    """Convert an InnerTube video (Invidious-compatible format) to our cached format.
+
+    Args:
+        v: InnerTube video data (from video_renderer_to_invidious)
+        channel_id: The channel ID
+
+    Returns:
+        Video dict in our format
+    """
+    # InnerTube thumbnails are already absolute URLs
+    raw_thumbnails = v.get("videoThumbnails", [])
+    best_thumb_url, all_thumbnails = _get_all_thumbnails(raw_thumbnails)
+
+    return {
+        "video_id": v.get("videoId", ""),
+        "title": v.get("title", ""),
+        "author": v.get("author", ""),
+        "author_id": v.get("authorId", channel_id),
+        "length_seconds": v.get("lengthSeconds", 0),
+        "view_count": v.get("viewCount"),
+        "published": None,  # InnerTube doesn't provide Unix timestamps
+        "published_text": v.get("publishedText", ""),
+        "thumbnail_url": best_thumb_url,
+        "thumbnails": all_thumbnails,
+        "video_url": f"https://www.youtube.com/watch?v={v.get('videoId', '')}",
+    }
+
+
+async def _fetch_channel_metadata_innertube(channel_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch channel metadata from InnerTube.
+
+    Args:
+        channel_id: The channel ID
+
+    Returns:
+        Dict with subscriber_count and is_verified, or None
+    """
+    try:
+        channel_info = await innertube.get_channel_info(channel_id)
+        if channel_info:
+            return {
+                "subscriber_count": channel_info.get("subCount"),
+                "is_verified": channel_info.get("authorVerified", False),
+            }
+    except innertube.InnerTubeError as e:
+        logger.debug(f"[Feed] InnerTube channel metadata failed for {channel_id}: {e}")
+    except (KeyError, TypeError, ValueError) as e:
+        logger.debug(f"[Feed] InnerTube channel metadata failed for {channel_id}: {e}")
+    return None
+
+
+async def _fetch_from_innertube(
+    channel_id: str, max_videos: int
+) -> tuple[Optional[List[dict]], Optional[Dict[str, Any]]]:
+    """Fetch videos from InnerTube API.
+
+    Args:
+        channel_id: The YouTube channel ID
+        max_videos: Maximum number of videos to fetch
+
+    Returns:
+        Tuple of (videos_list or None, channel_metadata or None)
+    """
+    try:
+        all_videos = []
+        continuation = None
+        page_count = 0
+
+        while len(all_videos) < max_videos:
+            page_count += 1
+            data = await innertube.get_channel_videos(channel_id, continuation)
+
+            if not data or not data.get("videos"):
+                break
+
+            for v in data["videos"]:
+                all_videos.append(_process_innertube_video(v, channel_id))
+
+            continuation = data.get("continuation")
+            if not continuation:
+                break
+
+        if not all_videos:
+            return None, None
+
+        all_videos = all_videos[:max_videos]
+        logger.info(f"[Feed] InnerTube: fetched {len(all_videos)} videos for {channel_id} ({page_count} pages)")
+
+        # Fetch channel metadata
+        channel_metadata = await _fetch_channel_metadata_innertube(channel_id)
+
+        return all_videos, channel_metadata
+
+    except innertube.InnerTubeError as e:
+        logger.info(f"[Feed] InnerTube failed for {channel_id}: {e}")
+        return None, None
+    except (KeyError, TypeError, ValueError) as e:
+        logger.debug(f"[Feed] InnerTube failed for {channel_id}: {e}")
+        return None, None
 
 
 async def _fetch_channel_metadata_invidious(channel_id: str) -> Optional[Dict[str, Any]]:
@@ -312,19 +415,27 @@ async def fetch_channel_feed(
     fallback_reason: Optional[str] = None
 
     try:
-        # For YouTube, try Invidious first (faster and includes publish dates)
-        if site.lower() == "youtube" and invidious_proxy.is_enabled():
-            logger.debug(f"Attempting Invidious fetch for {channel_id} ({site}) - max_videos={s.feed_max_videos}")
-            videos, pagination_info, should_fallback, fallback_reason = await _fetch_from_invidious(
-                channel_id, s.feed_max_videos
-            )
+        # For YouTube: InnerTube → Invidious → yt-dlp
+        if site.lower() == "youtube":
+            # Try InnerTube first (rich data: viewCount, author, publishedText)
+            innertube_videos, innertube_metadata = await _fetch_from_innertube(channel_id, s.feed_max_videos)
+            if innertube_videos:
+                logger.debug(f"Fetched {len(innertube_videos)} videos from InnerTube for {channel_id}")
+                return innertube_videos, None, innertube_metadata
 
-            if videos and not should_fallback:
-                logger.debug(f"Fetched {len(videos)} videos from Invidious for {channel_id} ({site})")
-                channel_metadata = await _fetch_channel_metadata_invidious(channel_id)
-                return videos, pagination_info, channel_metadata
+            # Try Invidious second (includes publish timestamps)
+            if invidious_proxy.is_enabled():
+                logger.debug(f"Attempting Invidious fetch for {channel_id} - max_videos={s.feed_max_videos}")
+                videos, pagination_info, should_fallback, fallback_reason = await _fetch_from_invidious(
+                    channel_id, s.feed_max_videos
+                )
 
-        # Fall back to yt-dlp for all sites (or if Invidious failed/not enabled)
+                if videos and not should_fallback:
+                    logger.debug(f"Fetched {len(videos)} videos from Invidious for {channel_id}")
+                    channel_metadata = await _fetch_channel_metadata_invidious(channel_id)
+                    return videos, pagination_info, channel_metadata
+
+        # Fall back to yt-dlp for all sites (or if InnerTube+Invidious failed/not enabled)
         if fallback_reason:
             logger.info(f"[Feed] {channel_id}: Using yt-dlp fallback (reason: {fallback_reason})")
         logger.debug(f"Using yt-dlp for {channel_id} ({site}) - flat_playlist={s.feed_ytdlp_use_flat_playlist}")

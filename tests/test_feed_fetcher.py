@@ -441,16 +441,34 @@ class TestFetchChannelFeed:
     """Tests for fetch_channel_feed function."""
 
     @pytest.mark.asyncio
-    async def test_uses_invidious_for_youtube(self):
-        """Test uses Invidious for YouTube channels."""
+    async def test_uses_innertube_for_youtube(self):
+        """Test uses InnerTube first for YouTube channels."""
         with (
             patch("feed_fetcher.get_settings") as mock_settings,
+            patch("feed_fetcher._fetch_from_innertube", new_callable=AsyncMock) as mock_innertube,
+        ):
+            mock_settings.return_value.feed_max_videos = 30
+            mock_settings.return_value.feed_ytdlp_use_flat_playlist = True
+            mock_innertube.return_value = ([{"video_id": "abc123"}], {"subscriber_count": 1000})
+
+            videos, pagination_info, metadata = await fetch_channel_feed("UC123", "youtube", "https://youtube.com/@test")
+
+            assert len(videos) == 1
+            mock_innertube.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_uses_invidious_when_innertube_fails(self):
+        """Test falls back to Invidious when InnerTube fails."""
+        with (
+            patch("feed_fetcher.get_settings") as mock_settings,
+            patch("feed_fetcher._fetch_from_innertube", new_callable=AsyncMock) as mock_innertube,
             patch("feed_fetcher.invidious_proxy.is_enabled", return_value=True),
             patch("feed_fetcher._fetch_from_invidious", new_callable=AsyncMock) as mock_invidious,
             patch("feed_fetcher._fetch_channel_metadata_invidious", new_callable=AsyncMock) as mock_meta,
         ):
             mock_settings.return_value.feed_max_videos = 30
             mock_settings.return_value.feed_ytdlp_use_flat_playlist = True
+            mock_innertube.return_value = (None, None)
             mock_invidious.return_value = ([{"video_id": "abc123"}], {"total_fetched": 1}, False, None)
             mock_meta.return_value = {"subscriber_count": 1000}
 
@@ -461,16 +479,18 @@ class TestFetchChannelFeed:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_ytdlp(self):
-        """Test falls back to yt-dlp when Invidious fails."""
+        """Test falls back to yt-dlp when InnerTube and Invidious fail."""
         with (
             patch("feed_fetcher.get_settings") as mock_settings,
+            patch("feed_fetcher._fetch_from_innertube", new_callable=AsyncMock) as mock_innertube,
             patch("feed_fetcher.invidious_proxy.is_enabled", return_value=True),
             patch("feed_fetcher._fetch_from_invidious", new_callable=AsyncMock) as mock_invidious,
             patch("feed_fetcher._fetch_from_ytdlp", new_callable=AsyncMock) as mock_ytdlp,
         ):
             mock_settings.return_value.feed_max_videos = 30
             mock_settings.return_value.feed_ytdlp_use_flat_playlist = True
-            mock_invidious.return_value = (None, None, True, "invidious_error_500")  # Should fallback
+            mock_innertube.return_value = (None, None)
+            mock_invidious.return_value = (None, None, True, "invidious_error_500")
             mock_ytdlp.return_value = ([{"video_id": "abc123"}], None)
 
             videos, pagination_info, metadata = await fetch_channel_feed("UC123", "youtube", "https://youtube.com/@test")
