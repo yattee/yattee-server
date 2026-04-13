@@ -52,6 +52,25 @@ def _thumbnail_quality(width: int) -> str:
     return "default"
 
 
+_STANDARD_THUMBNAILS = [
+    ("default.jpg", "default", 120, 90),
+    ("mqdefault.jpg", "medium", 320, 180),
+    ("hqdefault.jpg", "high", 480, 360),
+    ("sddefault.jpg", "sddefault", 640, 480),
+    ("maxresdefault.jpg", "maxres", 1280, 720),
+]
+
+
+def _standard_video_thumbnails(video_id: str) -> List[Dict[str, Any]]:
+    """Generate standard YouTube thumbnail entries for a video ID."""
+    if not video_id:
+        return []
+    return [
+        {"quality": quality, "url": f"https://i.ytimg.com/vi/{video_id}/{filename}", "width": width, "height": height}
+        for filename, quality, width, height in _STANDARD_THUMBNAILS
+    ]
+
+
 def _parse_count_text(text: str) -> Optional[int]:
     """Parse a count string like '1.2K views', '3M subscribers' to an integer."""
     if not text:
@@ -115,8 +134,8 @@ def video_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
                 author_url = f"/channel/{author_id}"
                 break
 
-    # Thumbnails
-    thumbnails = _extract_thumbnails(renderer.get("thumbnail"))
+    # Thumbnails – use well-known YouTube CDN URLs for full quality range
+    thumbnails = _standard_video_thumbnails(video_id)
 
     # Duration
     length_text = _extract_text(renderer.get("lengthText"))
@@ -292,7 +311,7 @@ def _reel_item_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a reelItemRenderer (shorts) to Invidious video format."""
     video_id = renderer.get("videoId", "")
     title = _extract_text(renderer.get("headline"))
-    thumbnails = _extract_thumbnails(renderer.get("thumbnail"))
+    thumbnails = _standard_video_thumbnails(video_id)
     view_count_text = _extract_text(renderer.get("viewCountText"))
 
     return {
@@ -321,7 +340,7 @@ def grid_video_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     """
     video_id = renderer.get("videoId", "")
     title = _extract_text(renderer.get("title"))
-    thumbnails = _extract_thumbnails(renderer.get("thumbnail"))
+    thumbnails = _standard_video_thumbnails(video_id)
     published_text = _extract_text(renderer.get("publishedTimeText"))
     view_count_text = _extract_text(renderer.get("viewCountText"))
 
