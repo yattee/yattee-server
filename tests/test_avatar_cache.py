@@ -93,10 +93,14 @@ class TestAvatarCacheFetchAndCache:
     """Tests for AvatarCache.fetch_and_cache method."""
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_invidious_disabled(self):
-        """Test that fetch_and_cache returns None when Invidious is disabled."""
+    async def test_returns_none_when_both_fail(self):
+        """Test that fetch_and_cache returns None when both InnerTube and Invidious fail."""
         cache = AvatarCache()
-        with patch("avatar_cache.invidious_proxy.is_enabled", return_value=False):
+        with (
+            patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it,
+            patch("avatar_cache.invidious_proxy.is_enabled", return_value=False),
+        ):
+            mock_it.return_value = None
             result = await cache.fetch_and_cache("UC123")
             assert result is None
 
@@ -110,39 +114,61 @@ class TestAvatarCacheFetchAndCache:
             assert result is None
 
     @pytest.mark.asyncio
-    async def test_fetches_and_caches_thumbnails(self):
-        """Test successful fetch and cache."""
+    async def test_fetches_and_caches_via_innertube(self):
+        """Test successful fetch and cache via InnerTube."""
         cache = AvatarCache()
-        mock_thumbnails = [
-            {"url": "/api/v1/thumbnails/UC123/0.jpg", "width": 88, "height": 88},
-            {"url": "/api/v1/thumbnails/UC123/1.jpg", "width": 176, "height": 176},
-        ]
-        mock_channel_data = {"authorThumbnails": mock_thumbnails}
+        mock_channel_info = {
+            "authorThumbnails": [
+                {"url": "https://yt3.ggpht.com/abc", "width": 88, "height": 88},
+                {"url": "https://yt3.ggpht.com/def", "width": 176, "height": 176},
+            ]
+        }
 
-        with (
-            patch("avatar_cache.invidious_proxy.is_enabled", return_value=True),
-            patch("avatar_cache.invidious_proxy.get_channel", new_callable=AsyncMock) as mock_get,
-            patch("avatar_cache.invidious_proxy.get_base_url", return_value="https://inv.example.com"),
-        ):
-            mock_get.return_value = mock_channel_data
+        with patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it:
+            mock_it.return_value = mock_channel_info
             result = await cache.fetch_and_cache("UC123")
 
             assert result is not None
             assert len(result) == 2
             assert "UC123" in cache._cache
-            # URLs should be resolved
+            assert result[0]["url"].startswith("https://yt3.ggpht.com")
+
+    @pytest.mark.asyncio
+    async def test_fetches_via_invidious_fallback(self):
+        """Test fetch falls back to Invidious when InnerTube fails."""
+        cache = AvatarCache()
+        mock_thumbnails = [
+            {"url": "/api/v1/thumbnails/UC123/0.jpg", "width": 88, "height": 88},
+        ]
+        mock_channel_data = {"authorThumbnails": mock_thumbnails}
+
+        with (
+            patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it,
+            patch("avatar_cache.invidious_proxy.is_enabled", return_value=True),
+            patch("avatar_cache.invidious_proxy.get_channel", new_callable=AsyncMock) as mock_get,
+            patch("avatar_cache.invidious_proxy.get_base_url", return_value="https://inv.example.com"),
+        ):
+            mock_it.return_value = None  # InnerTube fails
+            mock_get.return_value = mock_channel_data
+            result = await cache.fetch_and_cache("UC123")
+
+            assert result is not None
+            assert len(result) == 1
             assert result[0]["url"].startswith("https://inv.example.com")
 
     @pytest.mark.asyncio
     async def test_returns_none_on_fetch_error(self):
-        """Test that fetch_and_cache returns None on error."""
+        """Test that fetch_and_cache returns None when all sources error."""
         cache = AvatarCache()
+        from innertube import InnerTubeError
+        from invidious_proxy import InvidiousProxyError
+
         with (
+            patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it,
             patch("avatar_cache.invidious_proxy.is_enabled", return_value=True),
             patch("avatar_cache.invidious_proxy.get_channel", new_callable=AsyncMock) as mock_get,
         ):
-            from invidious_proxy import InvidiousProxyError
-
+            mock_it.side_effect = InnerTubeError("Failed")
             mock_get.side_effect = InvidiousProxyError("Network error")
             result = await cache.fetch_and_cache("UC123")
             assert result is None
@@ -151,14 +177,10 @@ class TestAvatarCacheFetchAndCache:
     async def test_removes_from_pending_after_fetch(self):
         """Test that channel is removed from pending after fetch."""
         cache = AvatarCache()
-        mock_channel_data = {"authorThumbnails": [{"url": "/thumb.jpg"}]}
+        mock_info = {"authorThumbnails": [{"url": "https://yt3.ggpht.com/thumb.jpg", "width": 88, "height": 88}]}
 
-        with (
-            patch("avatar_cache.invidious_proxy.is_enabled", return_value=True),
-            patch("avatar_cache.invidious_proxy.get_channel", new_callable=AsyncMock) as mock_get,
-            patch("avatar_cache.invidious_proxy.get_base_url", return_value="https://inv.example.com"),
-        ):
-            mock_get.return_value = mock_channel_data
+        with patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it:
+            mock_it.return_value = mock_info
             await cache.fetch_and_cache("UC123")
             assert "UC123" not in cache._pending
 
@@ -167,12 +189,10 @@ class TestAvatarCacheFetchAndCache:
         """Test that channel is removed from pending even on error."""
         cache = AvatarCache()
         with (
-            patch("avatar_cache.invidious_proxy.is_enabled", return_value=True),
-            patch("avatar_cache.invidious_proxy.get_channel", new_callable=AsyncMock) as mock_get,
+            patch("avatar_cache.innertube.get_channel_info", new_callable=AsyncMock) as mock_it,
+            patch("avatar_cache.invidious_proxy.is_enabled", return_value=False),
         ):
-            from invidious_proxy import InvidiousProxyError
-
-            mock_get.side_effect = InvidiousProxyError("Error")
+            mock_it.return_value = None
             await cache.fetch_and_cache("UC123")
             assert "UC123" not in cache._pending
 

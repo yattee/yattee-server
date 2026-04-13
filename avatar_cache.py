@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import innertube
 import invidious_proxy
 from converters import resolve_invidious_url
 from settings import get_settings
@@ -47,46 +48,26 @@ class AvatarCache:
         return None
 
     async def fetch_and_cache(self, channel_id: str) -> Optional[List[Dict[str, Any]]]:
-        """Fetch avatar from Invidious and cache it.
+        """Fetch avatar via InnerTube first, then Invidious fallback.
 
         Returns the thumbnails if successful, None otherwise.
         """
-        if not invidious_proxy.is_enabled():
-            return None
-
         async with self._lock:
-            # Check if already being fetched
             if channel_id in self._pending:
                 logger.debug(f"[AvatarCache] Already fetching {channel_id}")
                 return None
             self._pending.add(channel_id)
 
         try:
-            logger.info(f"[AvatarCache] Fetching avatar for {channel_id}")
-            channel_data = await invidious_proxy.get_channel(channel_id)
+            thumbnails = await self._fetch_innertube(channel_id) or await self._fetch_invidious(channel_id)
 
-            if channel_data and "authorThumbnails" in channel_data:
-                raw_thumbnails = channel_data.get("authorThumbnails", [])
-
-                # Resolve relative URLs before caching
-                invidious_base = invidious_proxy.get_base_url()
-                thumbnails = []
-                for thumb in raw_thumbnails:
-                    resolved_thumb = dict(thumb)
-                    if "url" in resolved_thumb:
-                        resolved_thumb["url"] = resolve_invidious_url(resolved_thumb["url"], invidious_base)
-                    thumbnails.append(resolved_thumb)
-
-                # Evict oldest entries if cache is full
+            if thumbnails:
                 await self._evict_if_needed()
-
                 self._cache[channel_id] = CachedAvatar(
                     channel_id=channel_id, thumbnails=thumbnails, cached_at=time.time()
                 )
-                logger.info(f"[AvatarCache] Cached avatar for {channel_id}")
+                logger.info(f"[AvatarCache] Cached avatar for {channel_id} ({len(thumbnails)} thumbnails)")
                 return thumbnails
-        except invidious_proxy.InvidiousProxyError as e:
-            logger.warning(f"[AvatarCache] Failed to fetch avatar for {channel_id}: {e}")
         except (KeyError, TypeError, ValueError) as e:
             logger.error(f"[AvatarCache] Unexpected error fetching avatar for {channel_id}: {e}")
         finally:
@@ -95,16 +76,39 @@ class AvatarCache:
 
         return None
 
+    async def _fetch_innertube(self, channel_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Fetch avatar thumbnails from InnerTube."""
+        try:
+            channel_info = await innertube.get_channel_info(channel_id)
+            if channel_info and channel_info.get("authorThumbnails"):
+                return channel_info["authorThumbnails"]
+        except innertube.InnerTubeError as e:
+            logger.debug(f"[AvatarCache] InnerTube failed for {channel_id}: {e}")
+        return None
+
+    async def _fetch_invidious(self, channel_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Fetch avatar thumbnails from Invidious."""
+        if not invidious_proxy.is_enabled():
+            return None
+
+        try:
+            channel_data = await invidious_proxy.get_channel(channel_id)
+            if channel_data and "authorThumbnails" in channel_data:
+                invidious_base = invidious_proxy.get_base_url()
+                return [
+                    {**thumb, "url": resolve_invidious_url(thumb.get("url", ""), invidious_base)}
+                    for thumb in channel_data.get("authorThumbnails", [])
+                ]
+        except invidious_proxy.InvidiousProxyError as e:
+            logger.warning(f"[AvatarCache] Invidious failed for {channel_id}: {e}")
+        return None
+
     def schedule_background_fetch(self, channel_id: str):
         """Schedule a background fetch for a channel avatar.
 
         This is fire-and-forget - doesn't block the caller.
         """
-        logger.info(f"[AvatarCache] schedule_background_fetch called for {channel_id}")
-
-        if not invidious_proxy.is_enabled():
-            logger.warning(f"[AvatarCache] Invidious proxy not enabled, skipping avatar fetch for {channel_id}")
-            return
+        logger.debug(f"[AvatarCache] schedule_background_fetch called for {channel_id}")
 
         # Skip if already cached and not expired
         cached = self._cache.get(channel_id)
