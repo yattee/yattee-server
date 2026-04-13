@@ -271,9 +271,10 @@ def convert_formats(
             if has_audio and not has_video:
                 lang = fmt.get("language")
                 format_note = fmt.get("format_note") or ""
-                # Check if this is the original/default audio track
-                # yt-dlp marks original tracks with "original" and/or "(default)" in format_note
-                is_original = "original" in format_note.lower() or "(default)" in format_note.lower()
+                # Check if this is the original audio track
+                # yt-dlp marks original tracks with "original" in format_note
+                # Note: "(default)" means default for the user's locale, NOT the original track
+                is_original = "original" in format_note.lower()
                 audio_track = AudioTrack(id=lang, displayName=format_note or lang, isDefault=is_original)
 
             adaptive_formats.append(
