@@ -257,6 +257,113 @@ def playlist_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def lockup_view_model_to_invidious(renderer: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert an InnerTube lockupViewModel to Invidious format.
+
+    YouTube uses lockupViewModel for playlist (and sometimes channel) results
+    in search instead of the older playlistRenderer/channelRenderer.
+    """
+    content_type = renderer.get("contentType", "")
+    content_id = renderer.get("contentId", "")
+
+    if not content_id:
+        return None
+
+    # Extract title
+    title = (
+        renderer.get("metadata", {})
+        .get("lockupMetadataViewModel", {})
+        .get("title", {})
+        .get("content", "")
+    )
+
+    # Extract metadata rows for author info
+    metadata_rows = (
+        renderer.get("metadata", {})
+        .get("lockupMetadataViewModel", {})
+        .get("metadata", {})
+        .get("contentMetadataViewModel", {})
+        .get("metadataRows", [])
+    )
+
+    author = ""
+    author_id = ""
+    for row in metadata_rows:
+        for part in row.get("metadataParts", []):
+            text_obj = part.get("text", {})
+            for cmd_run in text_obj.get("commandRuns", []):
+                browse = (
+                    cmd_run.get("onTap", {})
+                    .get("innertubeCommand", {})
+                    .get("browseEndpoint", {})
+                )
+                if browse.get("browseId") and not author_id:
+                    author = text_obj.get("content", "")
+                    author_id = browse["browseId"]
+                    break
+            if author_id:
+                break
+        if author_id:
+            break
+
+    if content_type == "LOCKUP_CONTENT_TYPE_PLAYLIST":
+        # Extract video count from thumbnail badge
+        video_count = 0
+        badges = (
+            renderer.get("contentImage", {})
+            .get("collectionThumbnailViewModel", {})
+            .get("primaryThumbnail", {})
+            .get("thumbnailViewModel", {})
+            .get("overlays", [])
+        )
+        for overlay in badges:
+            badge_vm = overlay.get("thumbnailOverlayBadgeViewModel", {})
+            for badge in badge_vm.get("thumbnailBadges", []):
+                badge_text = badge.get("thumbnailBadgeViewModel", {}).get("text", "")
+                if badge_text:
+                    try:
+                        video_count = int(badge_text.replace(",", "").split()[0])
+                    except (ValueError, IndexError):
+                        pass
+
+        # Extract thumbnail
+        thumb_sources = (
+            renderer.get("contentImage", {})
+            .get("collectionThumbnailViewModel", {})
+            .get("primaryThumbnail", {})
+            .get("thumbnailViewModel", {})
+            .get("image", {})
+            .get("sources", [])
+        )
+        playlist_thumbnail = thumb_sources[0].get("url", "") if thumb_sources else None
+
+        return {
+            "type": "playlist",
+            "playlistId": content_id,
+            "title": title,
+            "author": author,
+            "authorId": author_id,
+            "videoCount": video_count,
+            "playlistThumbnail": playlist_thumbnail,
+            "videos": [],
+        }
+
+    if content_type == "LOCKUP_CONTENT_TYPE_CHANNEL":
+        return {
+            "type": "channel",
+            "authorId": content_id,
+            "author": title,
+            "description": "",
+            "subCount": None,
+            "subCountText": "",
+            "videoCount": None,
+            "authorThumbnails": [],
+            "authorVerified": False,
+        }
+
+    return None
+
+
 def channel_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     """Convert an InnerTube channelRenderer to Invidious channel dict format."""
     channel_id = renderer.get("channelId", "")

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from innertube._client import innertube_post
 from innertube._converters import (
     channel_renderer_to_invidious,
+    lockup_view_model_to_invidious,
     playlist_renderer_to_invidious,
     video_renderer_to_invidious,
 )
@@ -87,6 +88,10 @@ def _parse_search_results(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 results.append(channel_renderer_to_invidious(item["channelRenderer"]))
             elif "playlistRenderer" in item:
                 results.append(playlist_renderer_to_invidious(item["playlistRenderer"]))
+            elif "lockupViewModel" in item:
+                converted = lockup_view_model_to_invidious(item["lockupViewModel"])
+                if converted:
+                    results.append(converted)
             # Skip ads, promos, shelves, "did you mean", etc.
 
     return results
