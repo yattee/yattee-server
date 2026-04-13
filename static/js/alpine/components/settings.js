@@ -26,8 +26,8 @@ document.addEventListener('alpine:init', () => {
         invidious_proxy_thumbnails: true,
         invidious_author_thumbnails: false,
 
-        feed_fetch_interval: 1800,
-        feed_fetch_interval_minutes: 30,
+        feed_fetch_interval: 21600,
+        feed_fetch_interval_minutes: 360,
         feed_channel_delay: 2,
         feed_max_videos: 30,
         feed_video_max_age: 30,
@@ -79,7 +79,7 @@ document.addEventListener('alpine:init', () => {
                 this.invidious_proxy_captions = settings.invidious_proxy_captions || false;
                 this.invidious_proxy_thumbnails = settings.invidious_proxy_thumbnails !== false;
                 this.invidious_author_thumbnails = settings.invidious_author_thumbnails || false;
-                this.feed_fetch_interval = settings.feed_fetch_interval || 1800;
+                this.feed_fetch_interval = settings.feed_fetch_interval || 21600;
                 this.feed_fetch_interval_minutes = Math.round(this.feed_fetch_interval / 60);
                 this.feed_channel_delay = settings.feed_channel_delay || 2;
                 this.feed_max_videos = settings.feed_max_videos || 30;

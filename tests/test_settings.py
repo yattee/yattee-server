@@ -30,7 +30,7 @@ class TestSettingsModel:
         assert s.max_search_results == 50
         assert s.invidious_instance is None
         assert s.invidious_timeout == 10
-        assert s.feed_fetch_interval == 1800
+        assert s.feed_fetch_interval == 21600
         assert s.feed_channel_delay == 2
         assert s.feed_max_videos == 30
         assert s.feed_video_max_age == 30

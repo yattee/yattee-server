@@ -165,7 +165,7 @@ def upgrade() -> None:
             invidious_proxy_playlists INTEGER DEFAULT 1,
             invidious_proxy_captions INTEGER DEFAULT 1,
             invidious_proxy_thumbnails INTEGER DEFAULT 1,
-            feed_fetch_interval INTEGER DEFAULT 1800,
+            feed_fetch_interval INTEGER DEFAULT 21600,
             feed_channel_delay INTEGER DEFAULT 2,
             feed_max_videos INTEGER DEFAULT 30,
             feed_video_max_age INTEGER DEFAULT 30,

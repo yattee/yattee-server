@@ -428,7 +428,7 @@ def test_settings(monkeypatch):
         invidious_instance=None,
         invidious_timeout=10,
         invidious_author_thumbnails=False,
-        feed_fetch_interval=1800,
+        feed_fetch_interval=21600,
         feed_channel_delay=2,
         feed_fallback_ytdlp_on_error=True,
         feed_video_max_age=30,

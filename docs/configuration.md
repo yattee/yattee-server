@@ -90,7 +90,7 @@ All cache TTL values are in seconds.
 
 | Setting | Type | Default | Range | Description |
 |---------|------|---------|-------|-------------|
-| `feed_fetch_interval` | integer | `1800` | 300 - 86400 | Background feed fetch interval in seconds |
+| `feed_fetch_interval` | integer | `21600` | 300 - 86400 | Background feed fetch interval in seconds |
 | `feed_channel_delay` | integer | `2` | 1 - 30 | Delay between fetching individual channels in seconds |
 | `feed_max_videos` | integer | `30` | 10 - 100 | Maximum videos to store per channel |
 | `feed_video_max_age` | integer | `30` | 1 - 365 | Maximum video age in days |
