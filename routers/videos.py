@@ -12,6 +12,7 @@ import innertube
 import invidious_proxy
 from basic_auth import get_current_user_from_request
 from converters import (
+    invidious_to_video_list_item,
     invidious_to_video_response,
     ytdlp_to_video_list_item,
     ytdlp_to_video_response,
@@ -204,12 +205,17 @@ async def _get_video_hybrid(
 
     # Both succeeded — merge stream URLs by itag
     format_streams, adaptive_formats = innertube.merge_stream_urls(it_video, info.get("formats"))
+
     if not adaptive_formats and not format_streams:
-        logger.warning(
-            f"[Videos] InnerTube/yt-dlp itag merge produced no streams for {video_id}; falling back to yt-dlp"
+        # InnerTube /player had no usable streamingData (commonly UNPLAYABLE
+        # from data-centre IPs). Use yt-dlp's streams + base metadata and
+        # enrich with InnerTube /next fields that yt-dlp doesn't provide.
+        logger.info(
+            f"[Videos] InnerTube /player had no matching itags for {video_id}; enriching yt-dlp response from /next"
         )
         response = ytdlp_to_video_response(info, base_url, proxy_streams=proxy_streams, user_id=user_id)
-        channel_id = info.get("channel_id")
+        _enrich_with_innertube_next(response, it_video)
+        channel_id = info.get("channel_id") or it_video.get("authorId")
         if channel_id:
             avatar_cache.get_cache().schedule_background_fetch(channel_id)
         return response
@@ -236,6 +242,41 @@ async def _get_video_hybrid(
                 ]
 
     return response
+
+
+def _enrich_with_innertube_next(response: VideoResponse, it_video: dict) -> None:
+    """Overlay author thumbnails, recommended videos, and full description
+    from an InnerTube /next-derived dict onto a yt-dlp-built response.
+
+    Used when /player streamingData is missing (UNPLAYABLE / data-centre IP)
+    but /next still has rich metadata we want to surface.
+    """
+    it_author_thumbs = it_video.get("authorThumbnails") or []
+    if it_author_thumbs and not response.authorThumbnails:
+        response.authorThumbnails = [
+            Thumbnail(
+                quality=t.get("quality", "default"),
+                url=t.get("url", ""),
+                width=t.get("width"),
+                height=t.get("height"),
+            )
+            for t in it_author_thumbs
+        ]
+
+    it_desc = it_video.get("description")
+    if it_desc and len(it_desc) > len(response.description or ""):
+        response.description = it_desc
+
+    it_recommended = it_video.get("recommendedVideos") or []
+    if it_recommended and not response.recommendedVideos:
+        converted = []
+        for rec in it_recommended:
+            try:
+                converted.append(invidious_to_video_list_item(rec))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if converted:
+            response.recommendedVideos = converted
 
 
 @router.get("/extract", response_model=VideoResponse)
