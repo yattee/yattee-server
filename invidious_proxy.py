@@ -564,44 +564,6 @@ async def get_caption_content(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/storyboards/{video_id}")
-async def proxy_storyboards(video_id: str, request: Request):
-    """Proxy storyboard requests to Invidious.
-
-    This endpoint handles /api/v1/storyboards/{video_id} and proxies to
-    {invidious}/api/v1/storyboards/{video_id}.
-    """
-    if not is_enabled():
-        raise HTTPException(status_code=503, detail="Invidious proxy not configured")
-
-    client = await get_client()
-
-    query_string = str(request.query_params)
-    url = f"{get_base_url()}/api/v1/storyboards/{video_id}"
-    if query_string:
-        url = f"{url}?{query_string}"
-
-    logger.info(f"[Storyboards] Proxy request: {video_id}")
-
-    try:
-        response = await client.get(url)
-
-        headers = {}
-        if "content-type" in response.headers:
-            headers["content-type"] = response.headers["content-type"]
-
-        return Response(content=response.content, status_code=response.status_code, headers=headers)
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"[Storyboards] Proxy error: {video_id} - HTTP {e.response.status_code}")
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except httpx.RequestError as e:
-        logger.warning(f"[Storyboards] Proxy error: {video_id} - {e}")
-        raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
-    except (ValueError, KeyError, TypeError) as e:
-        logger.warning(f"[Storyboards] Proxy error: {video_id} - {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/thumbnails/{video_id}/{filename}")
 async def proxy_thumbnail(video_id: str, filename: str, request: Request, token: str = None):
     """Proxy thumbnail requests.

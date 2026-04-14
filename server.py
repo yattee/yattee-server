@@ -23,7 +23,7 @@ import feed_fetcher
 import invidious_proxy
 from basic_auth import BasicAuthMiddleware
 from database.repositories.sites import get_enabled_sites
-from routers import admin, channels, comments, playlists, proxy, search, subscriptions, videos
+from routers import admin, channels, comments, playlists, proxy, search, storyboards, subscriptions, videos
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,7 @@ app.include_router(videos.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(channels.router, prefix="/api/v1")
 app.include_router(playlists.router, prefix="/api/v1")
+app.include_router(storyboards.router, prefix="/api/v1")
 app.include_router(proxy.router, prefix="/proxy")
 app.include_router(comments.router, prefix="/api/v1")
 app.include_router(subscriptions.router, prefix="/api/v1")

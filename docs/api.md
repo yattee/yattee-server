@@ -336,12 +336,12 @@ Get caption content in the specified format.
 
 ### GET `/api/v1/storyboards/{video_id}`
 
-Get video storyboards. Proxied to Invidious.
+Get video storyboards (scrubber preview thumbnails). Tries InnerTube first, then yt-dlp, then falls back to Invidious if configured.
 
 **Path Parameters:**
-- `video_id` (string) - Video ID
+- `video_id` (string) - YouTube video ID
 
-**Response:** Storyboard data.
+**Response:** JSON array of Storyboard objects (`url`, `templateUrl`, `width`, `height`, `count`, `interval`, `storyboardWidth`, `storyboardHeight`, `storyboardCount`). Empty array when no storyboards exist.
 
 ---
 

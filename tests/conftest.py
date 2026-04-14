@@ -457,6 +457,7 @@ def app_no_lifespan(test_db, test_settings, mock_ytdlp, monkeypatch):
         playlists,
         proxy,
         search,
+        storyboards,
         subscriptions,
         videos,
     )
@@ -482,6 +483,7 @@ def app_no_lifespan(test_db, test_settings, mock_ytdlp, monkeypatch):
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(channels.router, prefix="/api/v1")
     app.include_router(playlists.router, prefix="/api/v1")
+    app.include_router(storyboards.router, prefix="/api/v1")
     app.include_router(proxy.router, prefix="/proxy")
     app.include_router(comments.router, prefix="/api/v1")
     app.include_router(subscriptions.router, prefix="/api/v1")
