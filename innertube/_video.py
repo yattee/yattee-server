@@ -69,11 +69,21 @@ async def get_video_player_next(video_id: str, use_cache: bool = True) -> Dict[s
         logger.warning(f"[InnerTube] /next failed for {video_id}: {next_data}")
         next_data = {}
 
+    # NOTE: we don't raise on UNPLAYABLE/LOGIN_REQUIRED — YouTube frequently
+    # returns those for WEB-client /player calls from data-centre IPs even
+    # though videoDetails, /next metadata and captions are still populated.
+    # The router merges yt-dlp's deciphered URLs by itag, and if the merge
+    # yields no streams it falls back to the yt-dlp-only path.
     playability = player_data.get("playabilityStatus", {}) or {}
     status = playability.get("status")
-    if status in ("LOGIN_REQUIRED", "ERROR", "UNPLAYABLE"):
-        reason = playability.get("reason", status)
-        raise InnerTubeError(f"Unplayable: {reason}", is_retryable=False)
+    if status and status != "OK":
+        logger.info(f"[InnerTube] /player playabilityStatus={status} for {video_id}")
+
+    if not player_data.get("videoDetails") and not next_data:
+        raise InnerTubeError(
+            f"No video data: playabilityStatus={status}",
+            is_retryable=False,
+        )
 
     result = innertube_player_to_invidious_video(player_data, next_data)
     cache[cache_key] = result
