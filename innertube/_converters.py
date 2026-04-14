@@ -799,7 +799,12 @@ def _like_count_from_next(nxt: Dict[str, Any]) -> Optional[int]:
 
 
 def _recommended_videos_from_next(nxt: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extract recommended videos from /next secondaryResults."""
+    """Extract recommended videos from /next secondaryResults.
+
+    Modern WEB responses wrap each recommendation in:
+    - itemSectionRenderer.contents[*].lockupViewModel (new)
+    - compactVideoRenderer (legacy path)
+    """
     secondary = (
         nxt.get("contents", {})
         .get("twoColumnWatchNextResults", {})
@@ -807,12 +812,107 @@ def _recommended_videos_from_next(nxt: Dict[str, Any]) -> List[Dict[str, Any]]:
         .get("secondaryResults", {})
         .get("results", [])
     )
-    out = []
+    out: List[Dict[str, Any]] = []
     for item in secondary:
         if "compactVideoRenderer" in item:
-            renderer = item["compactVideoRenderer"]
-            out.append(_compact_video_to_invidious(renderer))
+            out.append(_compact_video_to_invidious(item["compactVideoRenderer"]))
+            continue
+        section = item.get("itemSectionRenderer", {})
+        for content in section.get("contents", []):
+            if "compactVideoRenderer" in content:
+                out.append(_compact_video_to_invidious(content["compactVideoRenderer"]))
+            elif "lockupViewModel" in content:
+                converted = _lockup_video_view_model_to_invidious(content["lockupViewModel"])
+                if converted:
+                    out.append(converted)
     return out
+
+
+def _lockup_video_view_model_to_invidious(renderer: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert a video-typed lockupViewModel (sidebar recommendation) to Invidious shape.
+
+    Only handles video content; channel/playlist lockups are skipped. Unlike
+    `lockup_view_model_to_invidious` (which returns playlist/channel shapes),
+    this targets LOCKUP_CONTENT_TYPE_VIDEO used for recommended videos.
+    """
+    content_id = renderer.get("contentId", "")
+    if not content_id:
+        return None
+
+    metadata_vm = renderer.get("metadata", {}).get("lockupMetadataViewModel", {})
+    title = metadata_vm.get("title", {}).get("content", "")
+
+    # Author info lives in metadataRows → metadataParts with commandRuns
+    author = ""
+    author_id = ""
+    rows = (
+        metadata_vm.get("metadata", {})
+        .get("contentMetadataViewModel", {})
+        .get("metadataRows", [])
+    )
+    for row in rows:
+        for part in row.get("metadataParts", []):
+            text_obj = part.get("text", {})
+            for cmd_run in text_obj.get("commandRuns", []):
+                browse = (
+                    cmd_run.get("onTap", {})
+                    .get("innertubeCommand", {})
+                    .get("browseEndpoint", {})
+                )
+                if browse.get("browseId") and not author_id:
+                    author = text_obj.get("content", "")
+                    author_id = browse["browseId"]
+                    break
+            if author_id:
+                break
+        if author_id:
+            break
+
+    # View count / published text live in rows too (second metadata row typically)
+    view_count_text = ""
+    published_text = ""
+    for row in rows:
+        for part in row.get("metadataParts", []):
+            text = part.get("text", {}).get("content", "")
+            if "view" in text.lower():
+                view_count_text = text
+            elif "ago" in text.lower():
+                published_text = text
+
+    # Duration comes from the thumbnail overlay
+    length_seconds = 0
+    overlays = (
+        renderer.get("contentImage", {})
+        .get("thumbnailViewModel", {})
+        .get("overlays", [])
+    )
+    for overlay in overlays:
+        badge = overlay.get("thumbnailOverlayBadgeViewModel", {})
+        for b in badge.get("thumbnailBadges", []):
+            text = b.get("thumbnailBadgeViewModel", {}).get("text", "")
+            if text and ":" in text:
+                length_seconds = _parse_duration_text(text)
+                break
+        if length_seconds:
+            break
+
+    return {
+        "type": "video",
+        "videoId": content_id,
+        "title": title,
+        "description": "",
+        "author": author,
+        "authorId": author_id,
+        "authorUrl": f"/channel/{author_id}" if author_id else "",
+        "videoThumbnails": _standard_video_thumbnails(content_id),
+        "lengthSeconds": length_seconds,
+        "viewCount": _parse_count_text(view_count_text),
+        "viewCountText": view_count_text,
+        "published": None,
+        "publishedText": published_text or None,
+        "liveNow": False,
+        "isUpcoming": False,
+    }
 
 
 def _compact_video_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
