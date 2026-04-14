@@ -6,16 +6,18 @@ and resolve_url + browse endpoints to search within channels.
 
 import base64
 import logging
+import time
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from innertube._client import innertube_post
+from innertube._client import InnerTubeError, innertube_post
 from innertube._converters import (
     channel_renderer_to_invidious,
     lockup_view_model_to_invidious,
     playlist_renderer_to_invidious,
     video_renderer_to_invidious,
 )
+from innertube._playlists import _extract_continuation_token
 
 logger = logging.getLogger("innertube")
 
@@ -24,6 +26,32 @@ SORT_MAP = {"date": 2, "views": 3, "rating": 4}
 DATE_MAP = {"hour": 1, "today": 2, "week": 3, "month": 4, "year": 5}
 DURATION_MAP = {"short": 1, "long": 2, "medium": 3}
 TYPE_MAP = {"video": 1, "channel": 2, "playlist": 3}
+
+_CACHE_TTL_SECONDS = 1800
+_MAX_PAGE_WALK = 50
+
+# Key: (query, search_type, sort, date, duration, page) where `page` is the page
+# that was just returned; the stored token fetches `page + 1`.
+_continuation_cache: Dict[Tuple[Any, ...], Tuple[str, float]] = {}
+
+
+def _cache_get(key: Tuple[Any, ...]) -> Optional[str]:
+    entry = _continuation_cache.get(key)
+    if not entry:
+        return None
+    token, expires_at = entry
+    if time.time() >= expires_at:
+        _continuation_cache.pop(key, None)
+        return None
+    return token
+
+
+def _cache_set(key: Tuple[Any, ...], token: str) -> None:
+    _continuation_cache[key] = (token, time.time() + _CACHE_TTL_SECONDS)
+
+
+def _cache_evict(key: Tuple[Any, ...]) -> None:
+    _continuation_cache.pop(key, None)
 
 
 def _build_search_params(
@@ -67,10 +95,29 @@ def _build_search_params(
     return base64.b64encode(data).decode() if data else None
 
 
-def _parse_search_results(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Parse mixed search results from InnerTube search response."""
-    results = []
+def _parse_result_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert a single search result item to Invidious format, or None if unsupported."""
+    if "videoRenderer" in item:
+        return video_renderer_to_invidious(item["videoRenderer"])
+    if "channelRenderer" in item:
+        return channel_renderer_to_invidious(item["channelRenderer"])
+    if "playlistRenderer" in item:
+        return playlist_renderer_to_invidious(item["playlistRenderer"])
+    if "lockupViewModel" in item:
+        return lockup_view_model_to_invidious(item["lockupViewModel"])
+    return None
 
+
+def _parse_search_results(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parse mixed search results and continuation token from an InnerTube search response.
+
+    Handles both the initial-response shape (sectionListRenderer) and the
+    continuation-response shape (appendContinuationItemsAction).
+    """
+    results: List[Dict[str, Any]] = []
+    continuation: Optional[str] = None
+
+    # Initial-response shape.
     sections = (
         data.get("contents", {})
         .get("twoColumnSearchResultsRenderer", {})
@@ -78,21 +125,82 @@ def _parse_search_results(data: Dict[str, Any]) -> List[Dict[str, Any]]:
         .get("sectionListRenderer", {})
         .get("contents", [])
     )
-
     for section in sections:
-        isr = section.get("itemSectionRenderer", {})
-        for item in isr.get("contents", []):
-            if "videoRenderer" in item:
-                results.append(video_renderer_to_invidious(item["videoRenderer"]))
-            elif "channelRenderer" in item:
-                results.append(channel_renderer_to_invidious(item["channelRenderer"]))
-            elif "playlistRenderer" in item:
-                results.append(playlist_renderer_to_invidious(item["playlistRenderer"]))
-            elif "lockupViewModel" in item:
-                converted = lockup_view_model_to_invidious(item["lockupViewModel"])
+        if "itemSectionRenderer" in section:
+            for item in section["itemSectionRenderer"].get("contents", []):
+                converted = _parse_result_item(item)
                 if converted:
                     results.append(converted)
-            # Skip ads, promos, shelves, "did you mean", etc.
+        elif "continuationItemRenderer" in section:
+            token = _extract_continuation_token(section["continuationItemRenderer"])
+            if token:
+                continuation = token
+
+    # Continuation-response shape.
+    for command in data.get("onResponseReceivedCommands", []):
+        append = command.get("appendContinuationItemsAction", {})
+        for item in append.get("continuationItems", []):
+            if "itemSectionRenderer" in item:
+                for content in item["itemSectionRenderer"].get("contents", []):
+                    converted = _parse_result_item(content)
+                    if converted:
+                        results.append(converted)
+            elif "continuationItemRenderer" in item:
+                token = _extract_continuation_token(item["continuationItemRenderer"])
+                if token:
+                    continuation = token
+
+    return results, continuation
+
+
+async def _fetch_initial(
+    query: str, search_type: str, sort: Optional[str], date: Optional[str], duration: Optional[str]
+) -> Dict[str, Any]:
+    body: Dict[str, Any] = {"query": query}
+    params = _build_search_params(search_type=search_type, sort=sort, date=date, duration=duration)
+    if params:
+        body["params"] = params
+    return await innertube_post("search", body)
+
+
+async def _fetch_continuation(token: str) -> Dict[str, Any]:
+    return await innertube_post("search", {"continuation": token})
+
+
+async def _walk_to_page(
+    prefix: Tuple[Any, ...],
+    query: str,
+    search_type: str,
+    sort: Optional[str],
+    date: Optional[str],
+    duration: Optional[str],
+    target_page: int,
+) -> List[Dict[str, Any]]:
+    """Walk page 1 → target_page via sequential continuations, caching each token.
+
+    Returns the results of `target_page`, or [] if we run out of tokens before getting there.
+    """
+    data = await _fetch_initial(query, search_type, sort, date, duration)
+    results, token = _parse_search_results(data)
+    if token:
+        _cache_set((*prefix, 1), token)
+
+    current_page = 1
+    while current_page < target_page:
+        if not token:
+            return []
+        try:
+            data = await _fetch_continuation(token)
+        except InnerTubeError as e:
+            logger.info(f"[InnerTube] Search walk failed at page {current_page + 1}: {e}")
+            return []
+        results, next_token = _parse_search_results(data)
+        current_page += 1
+        if next_token:
+            _cache_set((*prefix, current_page), next_token)
+        if not results:
+            return []
+        token = next_token
 
     return results
 
@@ -105,12 +213,12 @@ async def search(
     date: Optional[str] = None,
     duration: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Search YouTube via InnerTube.
+    """Search YouTube via InnerTube with continuation-based pagination.
 
     Args:
         query: Search query string
         search_type: Result type - "video", "channel", "playlist", or "all"
-        page: Page number (only page 1 supported; returns empty for page > 1)
+        page: 1-based page number
         sort: Sort by - "relevance", "date", "views", "rating"
         date: Upload date filter - "hour", "today", "week", "month", "year"
         duration: Duration filter - "short", "medium", "long"
@@ -118,21 +226,39 @@ async def search(
     Returns:
         List of result dicts in Invidious-compatible format
     """
-    if page > 1:
-        # Continuation-based pagination not implemented yet;
-        # let the router fall through to Invidious/yt-dlp
+    if page < 1 or page > _MAX_PAGE_WALK:
         return []
 
-    body: Dict[str, Any] = {"query": query}
+    prefix: Tuple[Any, ...] = (query, search_type, sort, date, duration)
 
-    params = _build_search_params(search_type=search_type, sort=sort, date=date, duration=duration)
-    if params:
-        body["params"] = params
+    if page == 1:
+        data = await _fetch_initial(query, search_type, sort, date, duration)
+        results, token = _parse_search_results(data)
+        if token:
+            _cache_set((*prefix, 1), token)
+        logger.info(f"[InnerTube] Search q={query} type={search_type} page=1: {len(results)} results")
+        return results
 
-    data = await innertube_post("search", body)
-    results = _parse_search_results(data)
+    cached = _cache_get((*prefix, page - 1))
+    if cached:
+        try:
+            data = await _fetch_continuation(cached)
+            results, next_token = _parse_search_results(data)
+            if next_token:
+                _cache_set((*prefix, page), next_token)
+            logger.info(
+                f"[InnerTube] Search q={query} type={search_type} page={page} (cached): {len(results)} results"
+            )
+            return results
+        except InnerTubeError as e:
+            if e.status_code and 400 <= e.status_code < 500:
+                logger.info(f"[InnerTube] Stale continuation for page {page}, re-walking: {e}")
+                _cache_evict((*prefix, page - 1))
+            else:
+                raise
 
-    logger.info(f"[InnerTube] Search q={query} type={search_type}: {len(results)} results")
+    results = await _walk_to_page(prefix, query, search_type, sort, date, duration, page)
+    logger.info(f"[InnerTube] Search q={query} type={search_type} page={page} (walk): {len(results)} results")
     return results
 
 

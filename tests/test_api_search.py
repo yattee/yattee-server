@@ -635,3 +635,208 @@ class TestPopular:
 
         assert response.status_code == 200
         assert response.json() == []
+
+
+# =============================================================================
+# Tests for InnerTube search continuation pagination (innertube._search.search)
+# =============================================================================
+
+
+def _innertube_page_response(video_ids, continuation=None, initial_shape=True):
+    """Build a minimal InnerTube /search response containing the given video IDs.
+
+    initial_shape=True uses the first-page contents path; False uses the
+    continuation-response path (onResponseReceivedCommands).
+    """
+    item_contents = [
+        {
+            "videoRenderer": {
+                "videoId": vid,
+                "title": {"runs": [{"text": f"Video {vid}"}]},
+            }
+        }
+        for vid in video_ids
+    ]
+    section_contents = [{"itemSectionRenderer": {"contents": item_contents}}]
+    if continuation:
+        section_contents.append(
+            {
+                "continuationItemRenderer": {
+                    "continuationEndpoint": {
+                        "continuationCommand": {"token": continuation},
+                    }
+                }
+            }
+        )
+
+    if initial_shape:
+        return {
+            "contents": {
+                "twoColumnSearchResultsRenderer": {
+                    "primaryContents": {
+                        "sectionListRenderer": {"contents": section_contents},
+                    }
+                }
+            }
+        }
+
+    return {
+        "onResponseReceivedCommands": [
+            {"appendContinuationItemsAction": {"continuationItems": section_contents}}
+        ]
+    }
+
+
+@pytest.fixture(autouse=True)
+def _reset_search_cache():
+    """Ensure the continuation cache is empty between tests."""
+    from innertube import _search
+
+    _search._continuation_cache.clear()
+    yield
+    _search._continuation_cache.clear()
+
+
+class TestInnertubeSearchPagination:
+    """Exercises the cache + sequential-walk logic in innertube._search.search()."""
+
+    @pytest.mark.asyncio
+    async def test_page_1_caches_continuation_token(self):
+        from innertube import _search
+
+        responses = [_innertube_page_response(["aaaaaaaaaaa"], continuation="TOKEN_P1")]
+
+        async def fake_post(endpoint, body):
+            return responses.pop(0)
+
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=1)
+
+        assert [r["videoId"] for r in results] == ["aaaaaaaaaaa"]
+        cached = _search._cache_get(("python", "video", None, None, None, 1))
+        assert cached == "TOKEN_P1"
+
+    @pytest.mark.asyncio
+    async def test_page_2_uses_cached_token(self):
+        from innertube import _search
+
+        # Prime cache so page 2 should be a single continuation call.
+        _search._cache_set(("python", "video", None, None, None, 1), "TOKEN_P1")
+
+        calls = []
+
+        async def fake_post(endpoint, body):
+            calls.append(body)
+            return _innertube_page_response(
+                ["bbbbbbbbbbb"], continuation="TOKEN_P2", initial_shape=False
+            )
+
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=2)
+
+        assert len(calls) == 1
+        assert calls[0] == {"continuation": "TOKEN_P1"}
+        assert [r["videoId"] for r in results] == ["bbbbbbbbbbb"]
+        # Next token should be cached for page 2.
+        assert _search._cache_get(("python", "video", None, None, None, 2)) == "TOKEN_P2"
+
+    @pytest.mark.asyncio
+    async def test_cold_cache_page_3_triggers_sequential_walk(self):
+        from innertube import _search
+
+        responses = [
+            _innertube_page_response(["aaa"], continuation="TOKEN_P1"),
+            _innertube_page_response(["bbb"], continuation="TOKEN_P2", initial_shape=False),
+            _innertube_page_response(["ccc"], continuation="TOKEN_P3", initial_shape=False),
+        ]
+        calls = []
+
+        async def fake_post(endpoint, body):
+            calls.append(body)
+            return responses.pop(0)
+
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=3)
+
+        assert len(calls) == 3
+        assert "query" in calls[0]
+        assert calls[1] == {"continuation": "TOKEN_P1"}
+        assert calls[2] == {"continuation": "TOKEN_P2"}
+        assert [r["videoId"] for r in results] == ["ccc"]
+        # All intermediate pages' tokens should have been cached on the walk.
+        assert _search._cache_get(("python", "video", None, None, None, 1)) == "TOKEN_P1"
+        assert _search._cache_get(("python", "video", None, None, None, 2)) == "TOKEN_P2"
+        assert _search._cache_get(("python", "video", None, None, None, 3)) == "TOKEN_P3"
+
+    @pytest.mark.asyncio
+    async def test_filter_change_uses_separate_cache_entry(self):
+        from innertube import _search
+
+        # Warm the cache for sort=date.
+        _search._cache_set(("python", "video", "date", None, None, 1), "TOKEN_DATE")
+
+        responses = [
+            _innertube_page_response(["aaa"], continuation="TOKEN_V1"),
+            _innertube_page_response(["bbb"], continuation="TOKEN_V2", initial_shape=False),
+        ]
+        calls = []
+
+        async def fake_post(endpoint, body):
+            calls.append(body)
+            return responses.pop(0)
+
+        # Changing sort to 'views' should miss the cache and trigger a walk.
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=2, sort="views")
+
+        assert len(calls) == 2
+        assert "query" in calls[0]
+        assert calls[1] == {"continuation": "TOKEN_V1"}
+        assert [r["videoId"] for r in results] == ["bbb"]
+
+    @pytest.mark.asyncio
+    async def test_stale_token_falls_back_to_walk(self):
+        from innertube import _search
+        from innertube._client import InnerTubeError
+
+        _search._cache_set(("python", "video", None, None, None, 1), "STALE_TOKEN")
+
+        responses = [
+            _innertube_page_response(["aaa"], continuation="TOKEN_P1"),
+            _innertube_page_response(["bbb"], continuation="TOKEN_P2", initial_shape=False),
+        ]
+        calls = []
+
+        async def fake_post(endpoint, body):
+            calls.append(body)
+            if body.get("continuation") == "STALE_TOKEN":
+                raise InnerTubeError("expired", status_code=400, is_retryable=False)
+            return responses.pop(0)
+
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=2)
+
+        # First call = stale continuation, then walk from page 1 → page 2.
+        assert len(calls) == 3
+        assert calls[0] == {"continuation": "STALE_TOKEN"}
+        assert "query" in calls[1]
+        assert calls[2] == {"continuation": "TOKEN_P1"}
+        assert [r["videoId"] for r in results] == ["bbb"]
+
+    @pytest.mark.asyncio
+    async def test_walk_returns_empty_when_token_exhausts_early(self):
+        from innertube import _search
+
+        # Page 1 returns a token, page 2 returns no continuation token — so page 3 is unreachable.
+        responses = [
+            _innertube_page_response(["aaa"], continuation="TOKEN_P1"),
+            _innertube_page_response(["bbb"], continuation=None, initial_shape=False),
+        ]
+
+        async def fake_post(endpoint, body):
+            return responses.pop(0)
+
+        with patch("innertube._search.innertube_post", side_effect=fake_post):
+            results = await _search.search("python", search_type="video", page=3)
+
+        assert results == []
