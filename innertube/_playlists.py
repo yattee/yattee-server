@@ -225,6 +225,24 @@ def _extract_continuation_videos(data: Dict[str, Any]) -> tuple[List[Dict[str, A
     return [], None
 
 
+def _extract_continuation_token(cir: Dict[str, Any]) -> Optional[str]:
+    """Extract a continuation token from a continuationItemRenderer.
+
+    Handles two shapes YouTube uses interchangeably:
+      - continuationEndpoint.continuationCommand.token (legacy)
+      - continuationEndpoint.commandExecutorCommand.commands[*].continuationCommand.token (current)
+    """
+    endpoint = cir.get("continuationEndpoint", {})
+    direct = endpoint.get("continuationCommand", {}).get("token")
+    if direct:
+        return direct
+    for cmd in endpoint.get("commandExecutorCommand", {}).get("commands", []):
+        token = cmd.get("continuationCommand", {}).get("token")
+        if token:
+            return token
+    return None
+
+
 def _parse_playlist_entries(entries: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Parse a list of playlistVideoListRenderer contents into video dicts + continuation."""
     videos: List[Dict[str, Any]] = []
@@ -242,12 +260,7 @@ def _parse_playlist_entries(entries: List[Dict[str, Any]]) -> tuple[List[Dict[st
                     converted.setdefault("lengthSeconds", 0)
                     videos.append(converted)
             elif "continuationItemRenderer" in entry:
-                token = (
-                    entry["continuationItemRenderer"]
-                    .get("continuationEndpoint", {})
-                    .get("continuationCommand", {})
-                    .get("token")
-                )
+                token = _extract_continuation_token(entry["continuationItemRenderer"])
                 if token:
                     continuation = token
         except (KeyError, TypeError, IndexError) as e:
