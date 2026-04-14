@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+import innertube
 import invidious_proxy
 from converters import invidious_to_playlist_response, ytdlp_to_video_list_item
 from models import PlaylistResponse
@@ -19,7 +20,16 @@ async def get_playlist(playlist_id: str):
     """Get playlist details and videos (Invidious-compatible)."""
     s = get_settings()
 
-    # Try Invidious proxy first if enabled
+    # Try InnerTube first
+    if innertube.is_enabled():
+        try:
+            info = await innertube.get_playlist(playlist_id)
+            if info:
+                return invidious_to_playlist_response(info, "")
+        except innertube.InnerTubeError as e:
+            logger.info(f"[Playlists] InnerTube failed for {playlist_id}: {e}")
+
+    # Try Invidious proxy next if enabled
     if s.invidious_proxy_playlists and invidious_proxy.is_enabled():
         try:
             data = await invidious_proxy.get_playlist(playlist_id)

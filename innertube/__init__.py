@@ -14,6 +14,7 @@ from innertube._browse import (
 )
 from innertube._client import InnerTubeError, get_client, innertube_get, innertube_post
 from innertube._comments import get_comments
+from innertube._playlists import get_playlist
 from innertube._search import search, search_channel
 from innertube._suggestions import get_search_suggestions
 from innertube._thumbnails import proxy_thumbnail
@@ -35,6 +36,7 @@ __all__ = [
     "get_channel_videos",
     "get_client",
     "get_comments",
+    "get_playlist",
     "get_popular",
     "get_search_suggestions",
     "get_trending",

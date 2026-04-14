@@ -216,6 +216,73 @@ def _parse_accessibility_duration(label: str) -> int:
     return total
 
 
+def playlist_video_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert an InnerTube playlistVideoRenderer to Invidious video dict format.
+
+    Used for entries inside a playlistVideoListRenderer (playlist browse response).
+    """
+    video_id = renderer.get("videoId", "")
+    title = _extract_text(renderer.get("title"))
+
+    # Author – from shortBylineText runs
+    byline = renderer.get("shortBylineText") or renderer.get("longBylineText") or {}
+    author = _extract_text(byline)
+    author_id = ""
+    author_url = ""
+    if isinstance(byline, dict):
+        for run in byline.get("runs", []):
+            browse = run.get("navigationEndpoint", {}).get("browseEndpoint", {})
+            if browse.get("browseId"):
+                author_id = browse["browseId"]
+                author_url = f"/channel/{author_id}"
+                break
+
+    # Thumbnails – prefer well-known CDN URLs for consistent full range
+    thumbnails = _standard_video_thumbnails(video_id)
+    if not thumbnails:
+        thumbnails = _extract_thumbnails(renderer.get("thumbnail"))
+
+    # Duration – playlistVideoRenderer usually has numeric lengthSeconds string
+    length_seconds = 0
+    raw_length = renderer.get("lengthSeconds")
+    if raw_length is not None:
+        try:
+            length_seconds = int(raw_length)
+        except (TypeError, ValueError):
+            length_seconds = 0
+    if not length_seconds:
+        length_seconds = _parse_duration_text(_extract_text(renderer.get("lengthText")))
+    if not length_seconds:
+        accessibility = renderer.get("lengthText", {}).get("accessibility", {}).get("accessibilityData", {})
+        length_seconds = _parse_accessibility_duration(accessibility.get("label", ""))
+
+    # Live status – thumbnailOverlays with LIVE style
+    is_live = False
+    for overlay in renderer.get("thumbnailOverlays", []):
+        status = overlay.get("thumbnailOverlayTimeStatusRenderer", {})
+        if status.get("style") == "LIVE":
+            is_live = True
+            break
+
+    return {
+        "type": "video",
+        "videoId": video_id,
+        "title": title,
+        "description": "",
+        "author": author,
+        "authorId": author_id,
+        "authorUrl": author_url,
+        "videoThumbnails": thumbnails,
+        "lengthSeconds": length_seconds,
+        "viewCount": 0,
+        "viewCountText": "",
+        "published": None,
+        "publishedText": None,
+        "liveNow": is_live,
+        "isUpcoming": False,
+    }
+
+
 def playlist_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     """Convert an InnerTube playlistRenderer to Invidious playlist dict format."""
     playlist_id = renderer.get("playlistId", "")
