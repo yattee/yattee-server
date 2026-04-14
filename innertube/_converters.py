@@ -842,7 +842,9 @@ def _lockup_video_view_model_to_invidious(renderer: Dict[str, Any]) -> Optional[
     metadata_vm = renderer.get("metadata", {}).get("lockupMetadataViewModel", {})
     title = metadata_vm.get("title", {}).get("content", "")
 
-    # Author info lives in metadataRows → metadataParts with commandRuns
+    # Author info lives in metadataRows. Two shapes observed:
+    #   1) Part text has a commandRuns with browseEndpoint (linked channel)
+    #   2) First row is just plain text with the channel name (no link)
     author = ""
     author_id = ""
     rows = (
@@ -867,6 +869,14 @@ def _lockup_video_view_model_to_invidious(renderer: Dict[str, Any]) -> Optional[
                 break
         if author_id:
             break
+
+    # Fallback: first metadata row with a single plain-text part is usually the author
+    if not author and rows:
+        first_parts = rows[0].get("metadataParts", [])
+        if len(first_parts) == 1:
+            candidate = first_parts[0].get("text", {}).get("content", "")
+            if candidate and "view" not in candidate.lower() and "ago" not in candidate.lower():
+                author = candidate
 
     # View count / published text live in rows too (second metadata row typically)
     view_count_text = ""
