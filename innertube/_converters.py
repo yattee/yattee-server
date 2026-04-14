@@ -5,6 +5,8 @@ so the existing `invidious_to_video_list_item()` etc. converters can be reused.
 """
 
 import logging
+import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("innertube")
@@ -568,4 +570,361 @@ def grid_playlist_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
         "videoCount": video_count,
         "playlistThumbnail": thumbnails[0]["url"] if thumbnails else None,
         "videos": [],
+    }
+
+
+# =============================================================================
+# /player + /next converter (video metadata)
+# =============================================================================
+
+
+_MIME_RE = re.compile(r'^([^/]+)/([^;]+)(?:;\s*codecs="([^"]+)")?')
+
+
+def _parse_mime_type(mime_type: str) -> Dict[str, str]:
+    """Split a mimeType like 'video/mp4; codecs="avc1.64001f"' into parts."""
+    if not mime_type:
+        return {"type": "", "container": "", "encoding": ""}
+    match = _MIME_RE.match(mime_type)
+    if not match:
+        return {"type": mime_type, "container": "", "encoding": ""}
+    _top, container, encoding = match.group(1), match.group(2), match.group(3) or ""
+    return {"type": mime_type, "container": container, "encoding": encoding}
+
+
+def _format_to_invidious(fmt: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a single InnerTube streamingData format to Invidious shape.
+
+    URL is intentionally left empty — WEB client URLs are ciphered, so the
+    caller must join yt-dlp's deciphered URL by itag.
+    """
+    mime_type = fmt.get("mimeType", "")
+    parts = _parse_mime_type(mime_type)
+    height = fmt.get("height")
+    width = fmt.get("width")
+    bitrate = fmt.get("bitrate")
+    is_audio = parts["type"].startswith("audio/") if parts["type"] else False
+
+    result: Dict[str, Any] = {
+        "url": "",
+        "itag": str(fmt.get("itag") or ""),
+        "type": parts["type"],
+        "container": parts["container"],
+        "resolution": f"{height}p" if height else None,
+        "width": width if not is_audio else None,
+        "height": height if not is_audio else None,
+        "encoding": parts["encoding"] or None,
+        "fps": fmt.get("fps"),
+        "bitrate": str(bitrate) if bitrate is not None else None,
+        "clen": str(fmt.get("contentLength")) if fmt.get("contentLength") else None,
+        "quality": fmt.get("qualityLabel") or fmt.get("quality", "") or (f"{height}p" if height else ""),
+        "size": str(fmt.get("contentLength")) if fmt.get("contentLength") else None,
+        "audioQuality": fmt.get("audioQuality") if is_audio else None,
+    }
+
+    audio_track = fmt.get("audioTrack")
+    if audio_track:
+        result["audioTrack"] = {
+            "id": audio_track.get("id"),
+            "displayName": audio_track.get("displayName"),
+            "isDefault": audio_track.get("audioIsDefault", False),
+        }
+
+    return result
+
+
+def _parse_storyboard_spec(spec: str, video_id: str) -> List[Dict[str, Any]]:
+    """Parse a YouTube storyboard spec string into Invidious-shaped storyboards.
+
+    Spec format: `BASE_URL|LEVEL1|LEVEL2|...` where each LEVEL is:
+    `w#h#count#cols#rows#interval#name#sig`
+    """
+    if not spec:
+        return []
+    parts = spec.split("|")
+    if len(parts) < 2:
+        return []
+    base_url = parts[0]
+    storyboards = []
+    for level_idx, level_str in enumerate(parts[1:]):
+        fields = level_str.split("#")
+        if len(fields) < 8:
+            continue
+        try:
+            w = int(fields[0])
+            h = int(fields[1])
+            total_count = int(fields[2])
+            cols = int(fields[3])
+            rows = int(fields[4])
+            interval = int(fields[5])
+            name = fields[6]
+            sig = fields[7]
+        except (ValueError, IndexError):
+            continue
+
+        # base_url has $L placeholder for level; $N for sheet number
+        template = base_url.replace("$L", str(level_idx)).replace("$N", name)
+        if "?" in template:
+            template = f"{template}&sigh={sig}"
+        else:
+            template = f"{template}?sigh={sig}"
+        first_url = template.replace("$M", "0")
+
+        storyboards.append({
+            "url": first_url,
+            "templateUrl": template,
+            "width": w,
+            "height": h,
+            "count": total_count,
+            "interval": interval,
+            "storyboardWidth": cols,
+            "storyboardHeight": rows,
+            "storyboardCount": max(1, (total_count + cols * rows - 1) // (cols * rows)) if cols and rows else 0,
+        })
+    _ = video_id  # reserved for future use
+    return storyboards
+
+
+def _captions_from_player(player: Dict[str, Any]) -> List[Dict[str, Any]]:
+    tracks = (
+        player.get("captions", {})
+        .get("playerCaptionsTracklistRenderer", {})
+        .get("captionTracks", [])
+    )
+    captions = []
+    for track in tracks:
+        label = _extract_text(track.get("name")) or ""
+        lang = track.get("languageCode", "") or ""
+        is_auto = track.get("kind") == "asr" or "(auto" in label.lower()
+        captions.append({
+            "label": label,
+            "languageCode": lang,
+            "url": track.get("baseUrl", ""),
+            "auto_generated": is_auto,
+        })
+    return captions
+
+
+def _published_timestamp(microformat: Dict[str, Any]) -> Optional[int]:
+    date_str = microformat.get("publishDate") or microformat.get("uploadDate")
+    if not date_str:
+        return None
+    try:
+        if "T" in date_str:
+            return int(datetime.fromisoformat(date_str.replace("Z", "+00:00")).timestamp())
+        return int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def _author_thumbnails_from_next(nxt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract channel avatar thumbnails from /next videoOwnerRenderer."""
+    contents = (
+        nxt.get("contents", {})
+        .get("twoColumnWatchNextResults", {})
+        .get("results", {})
+        .get("results", {})
+        .get("contents", [])
+    )
+    for item in contents:
+        owner = (
+            item.get("videoSecondaryInfoRenderer", {})
+            .get("owner", {})
+            .get("videoOwnerRenderer", {})
+        )
+        thumbs = owner.get("thumbnail", {}).get("thumbnails", [])
+        if thumbs:
+            return [
+                {
+                    "quality": _thumbnail_quality(t.get("width", 0)),
+                    "url": t.get("url", ""),
+                    "width": t.get("width"),
+                    "height": t.get("height"),
+                }
+                for t in thumbs
+            ]
+    return []
+
+
+def _full_description_from_next(nxt: Dict[str, Any]) -> str:
+    """Extract full description text from /next videoSecondaryInfoRenderer."""
+    contents = (
+        nxt.get("contents", {})
+        .get("twoColumnWatchNextResults", {})
+        .get("results", {})
+        .get("results", {})
+        .get("contents", [])
+    )
+    for item in contents:
+        sec = item.get("videoSecondaryInfoRenderer", {})
+        attr = sec.get("attributedDescription")
+        if attr and attr.get("content"):
+            return attr["content"]
+        desc = sec.get("description")
+        if desc:
+            return _extract_text(desc)
+    return ""
+
+
+def _like_count_from_next(nxt: Dict[str, Any]) -> Optional[int]:
+    """Extract like count from /next videoPrimaryInfoRenderer / menu buttons."""
+    contents = (
+        nxt.get("contents", {})
+        .get("twoColumnWatchNextResults", {})
+        .get("results", {})
+        .get("results", {})
+        .get("contents", [])
+    )
+    for item in contents:
+        primary = item.get("videoPrimaryInfoRenderer", {})
+        actions = primary.get("videoActions", {}).get("menuRenderer", {})
+        for button in actions.get("topLevelButtons", []):
+            seg = button.get("segmentedLikeDislikeButtonViewModel", {})
+            like = seg.get("likeButtonViewModel", {}).get("likeButtonViewModel", {})
+            like_count = like.get("toggleButtonViewModel", {}).get("toggleButtonViewModel", {}).get(
+                "defaultButtonViewModel", {}
+            ).get("buttonViewModel", {}).get("title")
+            if isinstance(like_count, str):
+                parsed = _parse_count_text(like_count)
+                if parsed:
+                    return parsed
+            # Older shape: topLevelButtons[].toggleButtonRenderer.defaultText
+            toggle = button.get("toggleButtonRenderer", {})
+            if toggle:
+                count = _extract_text(toggle.get("defaultText"))
+                parsed = _parse_count_text(count)
+                if parsed:
+                    return parsed
+    return None
+
+
+def _recommended_videos_from_next(nxt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract recommended videos from /next secondaryResults."""
+    secondary = (
+        nxt.get("contents", {})
+        .get("twoColumnWatchNextResults", {})
+        .get("secondaryResults", {})
+        .get("secondaryResults", {})
+        .get("results", [])
+    )
+    out = []
+    for item in secondary:
+        if "compactVideoRenderer" in item:
+            renderer = item["compactVideoRenderer"]
+            out.append(_compact_video_to_invidious(renderer))
+    return out
+
+
+def _compact_video_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert compactVideoRenderer (sidebar recommendations) to Invidious shape."""
+    video_id = renderer.get("videoId", "")
+    title = _extract_text(renderer.get("title"))
+    byline = renderer.get("longBylineText") or renderer.get("shortBylineText") or {}
+    author = _extract_text(byline)
+    author_id = ""
+    if isinstance(byline, dict):
+        for run in byline.get("runs", []):
+            browse = run.get("navigationEndpoint", {}).get("browseEndpoint", {})
+            if browse.get("browseId"):
+                author_id = browse["browseId"]
+                break
+
+    length_text = _extract_text(renderer.get("lengthText"))
+    length_seconds = _parse_duration_text(length_text)
+
+    view_count_text = _extract_text(renderer.get("viewCountText"))
+    view_count = _parse_count_text(view_count_text)
+
+    return {
+        "type": "video",
+        "videoId": video_id,
+        "title": title,
+        "description": _extract_text(renderer.get("descriptionSnippet")),
+        "author": author,
+        "authorId": author_id,
+        "authorUrl": f"/channel/{author_id}" if author_id else "",
+        "videoThumbnails": _standard_video_thumbnails(video_id),
+        "lengthSeconds": length_seconds,
+        "viewCount": view_count,
+        "viewCountText": view_count_text,
+        "published": None,
+        "publishedText": _extract_text(renderer.get("publishedTimeText")),
+        "liveNow": False,
+        "isUpcoming": False,
+    }
+
+
+def innertube_player_to_invidious_video(
+    player: Dict[str, Any], nxt: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Convert InnerTube /player + /next responses to Invidious-shaped dict.
+
+    Stream URLs in formatStreams/adaptiveFormats are empty strings because
+    WEB client URLs are ciphered. Call `merge_stream_urls` with yt-dlp's
+    format list to fill them in.
+    """
+    nxt = nxt or {}
+    details = player.get("videoDetails", {}) or {}
+    streaming = player.get("streamingData", {}) or {}
+    microformat = player.get("microformat", {}).get("playerMicroformatRenderer", {}) or {}
+
+    video_id = details.get("videoId", "")
+
+    format_streams = [_format_to_invidious(f) for f in streaming.get("formats", [])]
+    adaptive_formats = [_format_to_invidious(f) for f in streaming.get("adaptiveFormats", [])]
+
+    length_seconds = 0
+    raw_length = details.get("lengthSeconds")
+    if raw_length is not None:
+        try:
+            length_seconds = int(raw_length)
+        except (ValueError, TypeError):
+            length_seconds = 0
+
+    view_count = None
+    raw_views = details.get("viewCount")
+    if raw_views is not None:
+        try:
+            view_count = int(raw_views)
+        except (ValueError, TypeError):
+            view_count = None
+
+    storyboards = _parse_storyboard_spec(
+        player.get("storyboards", {}).get("playerStoryboardSpecRenderer", {}).get("spec", ""),
+        video_id,
+    )
+
+    captions = _captions_from_player(player)
+
+    author_thumbnails = _author_thumbnails_from_next(nxt)
+    full_description = _full_description_from_next(nxt)
+    like_count = _like_count_from_next(nxt)
+    recommended = _recommended_videos_from_next(nxt)
+
+    channel_id = details.get("channelId", "")
+
+    return {
+        "videoId": video_id,
+        "title": details.get("title", ""),
+        "description": full_description or details.get("shortDescription", ""),
+        "author": details.get("author", ""),
+        "authorId": channel_id,
+        "authorUrl": f"/channel/{channel_id}" if channel_id else None,
+        "authorThumbnails": author_thumbnails,
+        "lengthSeconds": length_seconds,
+        "published": _published_timestamp(microformat),
+        "publishedText": None,
+        "viewCount": view_count,
+        "likeCount": like_count,
+        "videoThumbnails": _standard_video_thumbnails(video_id),
+        "liveNow": bool(details.get("isLive", False)),
+        "isUpcoming": bool(details.get("isUpcoming", False)),
+        "hlsUrl": streaming.get("hlsManifestUrl"),
+        "dashUrl": streaming.get("dashManifestUrl"),
+        "formatStreams": format_streams,
+        "adaptiveFormats": adaptive_formats,
+        "captions": captions,
+        "storyboards": storyboards,
+        "recommendedVideos": recommended,
+        "keywords": details.get("keywords", []),
     }

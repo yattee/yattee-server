@@ -1,5 +1,6 @@
 """Video endpoints."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -7,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 import avatar_cache
 import database
+import innertube
 import invidious_proxy
 from basic_auth import get_current_user_from_request
 from converters import (
@@ -14,6 +16,7 @@ from converters import (
     ytdlp_to_video_list_item,
     ytdlp_to_video_response,
 )
+from innertube import InnerTubeError
 from models import ChannelExtractResponse, Thumbnail, VideoResponse
 from settings import get_settings
 from utils import get_base_url
@@ -89,66 +92,150 @@ async def get_video(
     # Query param overrides site config if explicitly provided
     proxy_streams = proxy if proxy is not None else site_proxy_streaming
 
-    # Determine whether to use Invidious proxy (query param overrides config)
-    use_invidious = invidious if invidious is not None else s.invidious_proxy_videos
-
-    # Try Invidious proxy first if enabled
-    if use_invidious and invidious_proxy.is_enabled():
+    # Explicit invidious=true forces Invidious (no fallback on success)
+    if invidious is True and invidious_proxy.is_enabled():
         try:
             data = await invidious_proxy.get_video(video_id)
-            if data:
-                # Skip Invidious for live videos - use yt-dlp instead
-                if data.get("liveNow", False):
-                    pass  # Fall through to yt-dlp
-                else:
-                    invidious_base = invidious_proxy.get_base_url()
-                    response = invidious_to_video_response(
-                        data, base_url, proxy_streams=proxy_streams, invidious_base_url=invidious_base, user_id=user_id
-                    )
-
-                    # Schedule background avatar caching for this channel
-                    channel_id = data.get("authorId")
-                    if channel_id:
-                        avatar_cache.get_cache().schedule_background_fetch(channel_id)
-
-                    return response
+            if data and not data.get("liveNow", False):
+                invidious_base = invidious_proxy.get_base_url()
+                response = invidious_to_video_response(
+                    data, base_url, proxy_streams=proxy_streams, invidious_base_url=invidious_base, user_id=user_id
+                )
+                channel_id = data.get("authorId")
+                if channel_id:
+                    avatar_cache.get_cache().schedule_background_fetch(channel_id)
+                return response
         except invidious_proxy.InvidiousProxyError:
-            pass  # Fall through to yt-dlp
+            pass  # Fall through to default path
 
+    # Default path: InnerTube metadata + yt-dlp stream URLs in parallel
     try:
-        info = await get_video_info(video_id)
-        response = ytdlp_to_video_response(info, base_url, proxy_streams=proxy_streams, user_id=user_id)
-
-        # Schedule background avatar caching for this channel
-        channel_id = info.get("channel_id")
-        if channel_id:
-            avatar_cache.get_cache().schedule_background_fetch(channel_id)
-
-        # Fetch channel avatar if enabled and we have channel ID and no thumbnails yet
-        if s.invidious_author_thumbnails:
-            if channel_id and not response.authorThumbnails:
-                # Try Invidious first
-                thumbnails = await invidious_proxy.get_channel_thumbnails(channel_id)
-                if thumbnails:
-                    response.authorThumbnails = thumbnails
-                else:
-                    # Fall back to scraping
-                    avatar_url = await get_channel_avatar(channel_id)
-                    if avatar_url:
-                        response.authorThumbnails = [
-                            Thumbnail(quality="default", url=avatar_url, width=176, height=176)
-                        ]
-
-        return response
+        response = await _get_video_hybrid(
+            video_id, base_url, proxy_streams=proxy_streams, user_id=user_id
+        )
+        if response is not None:
+            return response
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except YtDlpError as e:
+        # Last-resort Invidious fallback when yt-dlp fails and proxy config allows it
+        if s.invidious_proxy_videos and invidious_proxy.is_enabled() and invidious is not False:
+            try:
+                data = await invidious_proxy.get_video(video_id)
+                if data:
+                    invidious_base = invidious_proxy.get_base_url()
+                    response = invidious_to_video_response(
+                        data, base_url, proxy_streams=proxy_streams,
+                        invidious_base_url=invidious_base, user_id=user_id,
+                    )
+                    channel_id = data.get("authorId")
+                    if channel_id:
+                        avatar_cache.get_cache().schedule_background_fetch(channel_id)
+                    return response
+            except invidious_proxy.InvidiousProxyError:
+                pass
         raise HTTPException(status_code=404, detail=f"Video not found: {e}")
     except invidious_proxy.InvidiousProxyError as e:
         raise HTTPException(status_code=502, detail=f"Invidious error: {e}")
     except (KeyError, TypeError) as e:
         logger.error(f"[Videos] Unexpected error for {video_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+    raise HTTPException(status_code=404, detail="Video not found")
+
+
+async def _get_video_hybrid(
+    video_id: str,
+    base_url: str,
+    *,
+    proxy_streams: bool,
+    user_id: Optional[int],
+) -> Optional[VideoResponse]:
+    """Run InnerTube (/player + /next) and yt-dlp in parallel, merge the result.
+
+    - If InnerTube reports the video is live or fails, use yt-dlp alone.
+    - If yt-dlp fails while InnerTube succeeded, raise YtDlpError so the
+      caller can attempt the Invidious fallback.
+    """
+    s = get_settings()
+
+    it_video: Optional[dict] = None
+    it_error: Optional[BaseException] = None
+
+    if innertube.is_enabled():
+        it_result, ytdlp_result = await asyncio.gather(
+            innertube.get_video_player_next(video_id),
+            get_video_info(video_id),
+            return_exceptions=True,
+        )
+        if isinstance(it_result, BaseException):
+            it_error = it_result
+            if not isinstance(it_result, InnerTubeError):
+                logger.warning(f"[Videos] InnerTube unexpected error for {video_id}: {it_result}")
+            else:
+                logger.info(f"[Videos] InnerTube failed for {video_id}: {it_result}")
+        else:
+            it_video = it_result
+        if isinstance(ytdlp_result, BaseException):
+            raise ytdlp_result
+        info = ytdlp_result
+    else:
+        info = await get_video_info(video_id)
+
+    # Live video or InnerTube unavailable → yt-dlp alone
+    if it_video is None or it_video.get("liveNow", False):
+        if it_error is None and it_video is None:
+            logger.debug(f"[Videos] InnerTube disabled; using yt-dlp for {video_id}")
+        response = ytdlp_to_video_response(info, base_url, proxy_streams=proxy_streams, user_id=user_id)
+        channel_id = info.get("channel_id")
+        if channel_id:
+            avatar_cache.get_cache().schedule_background_fetch(channel_id)
+        if s.invidious_author_thumbnails and channel_id and not response.authorThumbnails:
+            thumbnails = await invidious_proxy.get_channel_thumbnails(channel_id)
+            if thumbnails:
+                response.authorThumbnails = thumbnails
+            else:
+                avatar_url = await get_channel_avatar(channel_id)
+                if avatar_url:
+                    response.authorThumbnails = [
+                        Thumbnail(quality="default", url=avatar_url, width=176, height=176)
+                    ]
+        return response
+
+    # Both succeeded — merge stream URLs by itag
+    format_streams, adaptive_formats = innertube.merge_stream_urls(it_video, info.get("formats"))
+    if not adaptive_formats and not format_streams:
+        logger.warning(
+            f"[Videos] InnerTube/yt-dlp itag merge produced no streams for {video_id}; falling back to yt-dlp"
+        )
+        response = ytdlp_to_video_response(info, base_url, proxy_streams=proxy_streams, user_id=user_id)
+        channel_id = info.get("channel_id")
+        if channel_id:
+            avatar_cache.get_cache().schedule_background_fetch(channel_id)
+        return response
+
+    merged = {**it_video, "formatStreams": format_streams, "adaptiveFormats": adaptive_formats}
+    response = invidious_to_video_response(
+        merged, base_url, proxy_streams=proxy_streams, invidious_base_url="", user_id=user_id
+    )
+
+    channel_id = it_video.get("authorId") or info.get("channel_id")
+    if channel_id:
+        avatar_cache.get_cache().schedule_background_fetch(channel_id)
+
+    # Fall back to Invidious/scrape for author thumbnails only if still missing
+    if s.invidious_author_thumbnails and channel_id and not response.authorThumbnails:
+        thumbnails = await invidious_proxy.get_channel_thumbnails(channel_id)
+        if thumbnails:
+            response.authorThumbnails = thumbnails
+        else:
+            avatar_url = await get_channel_avatar(channel_id)
+            if avatar_url:
+                response.authorThumbnails = [
+                    Thumbnail(quality="default", url=avatar_url, width=176, height=176)
+                ]
+
+    return response
 
 
 @router.get("/extract", response_model=VideoResponse)

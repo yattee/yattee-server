@@ -557,6 +557,24 @@ def reset_caches():
     ytdlp_wrapper.reset_caches()
 
 
+@pytest.fixture(autouse=True)
+def _reset_innertube_client_state():
+    """Reset InnerTube's shared httpx client and video cache between tests.
+
+    The shared client is bound to the event loop that created it. Without
+    resetting, a test can inherit a client whose loop was already closed,
+    producing 'Event loop is closed' errors.
+    """
+    import innertube._client as it_client
+    import innertube._video as it_video
+
+    it_client._client = None
+    it_video._video_cache = None
+    yield
+    it_client._client = None
+    it_video._video_cache = None
+
+
 @pytest.fixture
 def sample_video_id():
     """Valid YouTube video ID for testing."""

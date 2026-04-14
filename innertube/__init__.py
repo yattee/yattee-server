@@ -18,6 +18,7 @@ from innertube._playlists import get_playlist
 from innertube._search import search, search_channel
 from innertube._suggestions import get_search_suggestions
 from innertube._thumbnails import proxy_thumbnail
+from innertube._video import get_video_player_next, merge_stream_urls
 
 
 def is_enabled() -> bool:
@@ -40,9 +41,11 @@ __all__ = [
     "get_popular",
     "get_search_suggestions",
     "get_trending",
+    "get_video_player_next",
     "innertube_get",
     "innertube_post",
     "is_enabled",
+    "merge_stream_urls",
     "proxy_thumbnail",
     "search",
     "search_channel",
