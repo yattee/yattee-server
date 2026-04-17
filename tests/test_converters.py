@@ -1222,12 +1222,13 @@ class TestConvertStoryboards:
         assert result[0].templateUrl == "https://i.ytimg.com/sb/VIDEO_ID/storyboard3_L1/M$M.jpg?sqp=-abc"
 
     def test_interval_in_milliseconds(self):
-        """Test fragment duration is converted to milliseconds."""
+        """Fragment duration is per-sheet; interval must be per-frame (ms)."""
+        # 10x10 sheet covering 5.0s -> 50 ms per frame
         formats = [_make_storyboard_format(fragments=[
             {"url": "https://example.com/M0.jpg", "duration": 5.0},
         ])]
         result = convert_storyboards(formats)
-        assert result[0].interval == 5000
+        assert result[0].interval == 50
 
     def test_count_calculation(self):
         """Test count = columns * rows * number of fragments."""

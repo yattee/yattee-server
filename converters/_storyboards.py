@@ -33,10 +33,14 @@ def convert_storyboards(formats: Optional[List[dict]]) -> List[Storyboard]:
         if not first_url:
             continue
 
+        # yt-dlp's fragments[i].duration is the span covered by that sheet
+        # (columns*rows frames), not per-frame. The Invidious `interval` field
+        # is milliseconds per thumbnail frame, so divide by the sheet size.
+        frames_per_sheet = columns * rows
         duration = fragments[0].get("duration", 0)
-        interval = int(duration * 1000)
+        interval = int((duration * 1000) / frames_per_sheet) if frames_per_sheet else 0
         storyboard_count = len(fragments)
-        count = columns * rows * storyboard_count
+        count = frames_per_sheet * storyboard_count
 
         # Derive template URL: replace page number M0 with M$M
         template_url = re.sub(r"(/M)\d+(\.\w+)", r"\1$M\2", first_url)

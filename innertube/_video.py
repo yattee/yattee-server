@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from cachetools import TTLCache
 
 from innertube._client import InnerTubeError, innertube_post
-from innertube._converters import innertube_player_to_invidious_video
+from innertube._converters import _parse_storyboard_spec, innertube_player_to_invidious_video
 
 logger = logging.getLogger("innertube")
 
@@ -86,8 +86,45 @@ async def get_video_player_next(video_id: str, use_cache: bool = True) -> Dict[s
         )
 
     result = innertube_player_to_invidious_video(player_data, next_data)
+
+    # The WEB client often omits playerStoryboardSpecRenderer. When the primary
+    # /player response has no storyboards, do a supplemental /player call with
+    # the TVHTML5 client context which reliably returns the spec, and parse it
+    # into the Invidious-shaped list. yt-dlp and Invidious remain as further
+    # fallbacks in the router if this also yields nothing.
+    if not result.get("storyboards"):
+        try:
+            spec = await _fetch_storyboard_spec_tvhtml5(video_id)
+            if spec:
+                result["storyboards"] = _parse_storyboard_spec(spec, video_id)
+        except InnerTubeError as e:
+            logger.info(f"[InnerTube] TVHTML5 storyboard fetch failed for {video_id}: {e}")
+
     cache[cache_key] = result
     return result
+
+
+async def _fetch_storyboard_spec_tvhtml5(video_id: str) -> str:
+    """Fetch the raw storyboard spec string via the TVHTML5 client.
+
+    The WEB client omits playerStoryboardSpecRenderer for many videos; TVHTML5
+    consistently returns it. We call /player with an overridden context and
+    extract the spec string. Caller is responsible for parsing it.
+    """
+    body = {
+        "videoId": video_id,
+        "context": {
+            "client": {
+                "clientName": "TVHTML5",
+                "clientVersion": "7.20240304.10.00",
+                "hl": "en",
+                "gl": "US",
+            }
+        },
+    }
+    data = await innertube_post("player", body, use_cookies=False)
+    renderer = data.get("storyboards", {}).get("playerStoryboardSpecRenderer", {}) or {}
+    return renderer.get("spec") or ""
 
 
 def merge_stream_urls(
