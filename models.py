@@ -70,7 +70,13 @@ class Caption(BaseModel):
 class Storyboard(BaseModel):
     """Video storyboard/preview thumbnails."""
 
-    url: str
+    # `url` is treated by Yattee clients as a *proxy* endpoint — they append
+    # `&storyboard=N` to fetch individual sheets. Invidious honors that, but a
+    # direct `https://i.ytimg.com/.../M0.jpg` URL does not, so the client would
+    # receive sheet 0 for every timestamp. Leave this unset whenever we don't
+    # have a real proxy endpoint to hand over; the client then falls back to
+    # substituting `M$M` in `templateUrl` and fetching sheets directly.
+    url: Optional[str] = None
     templateUrl: str
     width: int
     height: int

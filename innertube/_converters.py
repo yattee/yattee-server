@@ -668,10 +668,13 @@ def _parse_storyboard_spec(spec: str, video_id: str) -> List[Dict[str, Any]]:
             template = f"{template}&sigh={sig}"
         else:
             template = f"{template}?sigh={sig}"
-        first_url = template.replace("$M", "0")
 
         storyboards.append({
-            "url": first_url,
+            # `url` would be treated by Yattee clients as a proxy endpoint
+            # (appending `&storyboard=N`); a direct ytimg URL ignores that
+            # and always returns sheet 0. Leave unset so the client uses
+            # `templateUrl` with $M substitution.
+            "url": None,
             "templateUrl": template,
             "width": w,
             "height": h,

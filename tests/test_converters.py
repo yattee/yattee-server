@@ -1213,7 +1213,10 @@ class TestConvertStoryboards:
         assert sb.storyboardHeight == 10
         assert sb.storyboardCount == 2
         assert sb.count == 10 * 10 * 2
-        assert sb.url == "https://i.ytimg.com/sb/VIDEO_ID/storyboard3_L1/M0.jpg?sqp=-abc"
+        # url is deliberately unset — Yattee clients treat it as a proxy endpoint,
+        # and a direct ytimg URL ignores the `?storyboard=N` param and always
+        # returns sheet 0. See models.Storyboard for the rationale.
+        assert sb.url is None
 
     def test_template_url_derivation(self):
         """Test M0 in URL is replaced with M$M in templateUrl."""

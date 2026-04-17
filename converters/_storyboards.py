@@ -32,6 +32,7 @@ def convert_storyboards(formats: Optional[List[dict]]) -> List[Storyboard]:
         first_url = fragments[0].get("url")
         if not first_url:
             continue
+        # Reserved for a future server-side proxy endpoint; see models.Storyboard.
 
         # yt-dlp's fragments[i].duration is the span covered by that sheet
         # (columns*rows frames), not per-frame. The Invidious `interval` field
@@ -47,7 +48,7 @@ def convert_storyboards(formats: Optional[List[dict]]) -> List[Storyboard]:
 
         storyboards.append(
             Storyboard(
-                url=first_url,
+                url=None,
                 templateUrl=template_url,
                 width=width,
                 height=height,
