@@ -1,7 +1,13 @@
-"""Switch existing instances to InnerTube-first defaults.
+"""Switch fresh installs to InnerTube-first defaults.
 
-Disables Invidious proxy, enables InnerTube, and increases feed fetch
-interval from 30 minutes to 360 minutes for users still on the old default.
+For brand new installs (no users provisioned yet), disable Invidious proxy
+and enable InnerTube. Existing instances keep their Invidious/InnerTube
+settings — in particular, a user who had the Invidious proxy enabled stays
+enabled.
+
+For all installs (fresh and existing), bump feed_fetch_interval from the
+old 30-minute default to 360 minutes when the user is still on that old
+default; users who customised the interval are left alone.
 
 Revision ID: 007
 Revises: 006
@@ -10,6 +16,7 @@ Create Date: 2026-04-13
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -19,19 +26,23 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _is_fresh_install() -> bool:
+    # Migrations run before env_provisioning creates the admin user, so an
+    # empty users table at this point means the database has never been used.
+    conn = op.get_bind()
+    count = conn.execute(sa.text("SELECT COUNT(*) FROM users")).scalar()
+    return (count or 0) == 0
+
+
 def upgrade() -> None:
-    """Switch to InnerTube-first defaults for existing users."""
-    # Disable Invidious proxy master toggle
-    op.execute("UPDATE settings SET invidious_enabled = 0")
+    """Apply InnerTube-first defaults only on fresh installs; bump feed interval for everyone on the old default."""
+    if _is_fresh_install():
+        op.execute("UPDATE settings SET invidious_enabled = 0")
+        op.execute("UPDATE settings SET innertube_enabled = 1")
 
-    # Enable InnerTube
-    op.execute("UPDATE settings SET innertube_enabled = 1")
-
-    # Update feed interval from old default (1800s / 30min) to 21600s (360min)
     op.execute("UPDATE settings SET feed_fetch_interval = 21600 WHERE feed_fetch_interval = 1800")
 
 
 def downgrade() -> None:
-    """Restore previous defaults."""
-    op.execute("UPDATE settings SET invidious_enabled = 1")
+    """Revert the feed interval bump; Invidious/InnerTube toggles on fresh installs are left in place."""
     op.execute("UPDATE settings SET feed_fetch_interval = 1800 WHERE feed_fetch_interval = 21600")
