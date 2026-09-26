@@ -4,7 +4,12 @@ import urllib.parse
 from typing import Dict, List, Optional
 
 import tokens as token_utils
-from converters._helpers import _enrich_audio_display_name, _filter_sensitive_headers, _xtags_from_url
+from converters._helpers import (
+    _enrich_audio_display_name,
+    _filter_sensitive_headers,
+    _xtags_from_url,
+    relay_manifest_url,
+)
 from models import (
     AdaptiveFormat,
     AudioTrack,
@@ -131,6 +136,7 @@ def convert_formats(
             for playback). ``"download"`` → legacy ``/proxy/fast/`` URLs (right
             shape for downloads, since the file gets cached on disk). ``"off"``
             → direct upstream URL (caller must pass `proxy_base_url=""`).
+            HLS manifests take ``/proxy/relay`` in every mode except ``"off"``.
         base_url: Server base URL (no path), needed for ``relay`` mode.
         original_url: Original URL for external sites (used for re-extraction in proxy)
         user_id: User ID for generating streaming tokens (if basic auth enabled)
@@ -161,15 +167,15 @@ def convert_formats(
 
         if is_hls:
             # Use manifest_url for HLS playback (not the chunklist url)
-            hls_url = fmt.get("manifest_url") or fmt.get("url")
-            if not hls_url:
+            manifest_url = fmt.get("manifest_url") or fmt.get("url")
+            if not manifest_url:
                 continue
 
             # HLS streams are muxed - add them as format streams
             hls_height = fmt.get("height")
             hls_width = fmt.get("width")
             new_stream = FormatStream(
-                url=hls_url,  # Direct URL to HLS manifest
+                url=relay_manifest_url(manifest_url, base_url=base_url, proxy_mode=proxy_mode),
                 itag=itag,
                 type="application/vnd.apple.mpegurl",
                 quality=f"{hls_height}p" if hls_height else fmt.get("format_note") or "unknown",
@@ -183,15 +189,15 @@ def convert_formats(
                 httpHeaders=_filter_sensitive_headers(fmt.get("http_headers")),
             )
 
-            # Deduplicate by URL only - keep stream with better metadata
-            if hls_url in hls_streams_by_url:
-                existing = hls_streams_by_url[hls_url]
-                # Prefer stream with actual resolution info
-                if (new_stream.height and not existing.height) or \
-                   (new_stream.quality != "unknown" and existing.quality == "unknown"):
-                    hls_streams_by_url[hls_url] = new_stream
-            else:
-                hls_streams_by_url[hls_url] = new_stream
+            # Deduplicate by upstream URL only - keep stream with better metadata.
+            # The signed links differ per call, so the manifest URL is the key.
+            existing = hls_streams_by_url.get(manifest_url)
+            if existing is None:
+                hls_streams_by_url[manifest_url] = new_stream
+            elif (new_stream.height and not existing.height) or (
+                new_stream.quality != "unknown" and existing.quality == "unknown"
+            ):
+                hls_streams_by_url[manifest_url] = new_stream
             continue
 
         direct_url = fmt.get("url")

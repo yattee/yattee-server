@@ -200,8 +200,10 @@
                             </select>
                         </div>
 
-                        <!-- Audio Selector (for separate audio tracks) -->
-                        <div x-show="audioTracks.length > 1">
+                        <!-- Audio Selector (for separate audio tracks). An HLS stream
+                             carries its own audio track, chosen by hls.js, so this
+                             selector stays for DASH streams only. -->
+                        <div x-show="audioTracks.length > 1 && !isHlsSelected">
                             <label class="text-xs text-muted mr-1">Audio:</label>
                             <select x-model="selectedAudio"
                                     @change="changeAudio()"
@@ -355,6 +357,8 @@
     <script src="/static/js/alpine/components/watch/player.js"></script>
     <script src="/static/js/alpine/components/watch/videoInfo.js"></script>
     <script src="/static/js/alpine/components/watch/downloads.js"></script>
+    <!-- HLS.js (HLS playback; video.js's built-in VHS cannot play YouTube's playlists) -->
+    <script src="/static/vendor/hls.min.js"></script>
     <!-- Video.js -->
     <script src="/static/vendor/video.min.js"></script>
     <!-- Alpine.js -->
