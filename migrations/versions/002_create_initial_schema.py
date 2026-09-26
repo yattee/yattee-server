@@ -121,9 +121,12 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_sites_extractor ON sites(extractor_pattern)")
 
     # Insert default YouTube site if no sites exist
+    # proxy_streaming starts on: it is the only setting that lets a browser (or
+    # any client on another network) play the stream URLs, since the CDN URLs
+    # are bound to the server's egress IP and send no CORS headers.
     op.execute("""
         INSERT OR IGNORE INTO sites (id, name, extractor_pattern, enabled, priority, proxy_streaming)
-        VALUES (1, 'YouTube', 'youtube', 1, 100, 0)
+        VALUES (1, 'YouTube', 'youtube', 1, 100, 1)
     """)
 
     # Credentials table

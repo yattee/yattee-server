@@ -37,6 +37,8 @@ Extract video details from any URL supported by yt-dlp (not just YouTube).
 
 **Query Parameters:**
 - `url` (string, required) - URL to extract from
+- `proxy` (boolean, optional) - Override the site `proxy_streaming` setting (true = proxy stream URLs, false = direct)
+- `proxy_mode` (string, optional) - How to proxy stream URLs when proxying is on: `download` (default — `/proxy/fast/`, downloads via yt-dlp and caches on disk), `relay` (`/proxy/relay` — byte-relay, supports `Range`, no disk write), or `off`. HLS manifests use `/proxy/relay` in every mode except `off`.
 
 **Response:** Invidious-compatible video object. Requires the site to be enabled in the Sites configuration (or `allow_all_sites_for_extraction` to be enabled).
 
@@ -302,7 +304,7 @@ Stream video using yt-dlp's parallel downloading. Downloads and streams the vide
 
 ### GET `/proxy/relay`
 
-Signed byte-relay for direct playback streams. The video endpoint embeds these URLs into `formatStreams` / `adaptiveFormats` when `proxy_mode=relay` (the default). Supports HTTP `Range` requests, forwards conditional headers, and rewrites HLS/DASH manifests so segments are also relayed. Does not write to disk.
+Signed byte-relay for direct playback streams. The video endpoint embeds these URLs into `formatStreams` / `adaptiveFormats` when `proxy_mode=relay` (the default), and HLS manifest URLs in every proxy mode except `off` — a browser cannot fetch a manifest straight from the CDN (no CORS headers), and the relay is what rewrites the segment URLs in the body. Supports HTTP `Range` requests, forwards conditional headers, and rewrites HLS/DASH manifests so segments are also relayed. Does not write to disk.
 
 **Query Parameters:**
 - `url` (string, required) - Upstream stream URL to relay (signed)

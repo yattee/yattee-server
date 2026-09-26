@@ -12,6 +12,7 @@ from converters._formatting import (
     get_valid_timestamp,
     parse_upload_date,
 )
+from converters._helpers import relay_manifest_url
 from converters._storyboards import convert_storyboards
 from models import (
     PlaylistListItem,
@@ -19,26 +20,6 @@ from models import (
     VideoListItem,
     VideoResponse,
 )
-
-
-def _maybe_relay_manifest(
-    url: Optional[str],
-    *,
-    base_url: str,
-    proxy_mode: str,
-    content_type: Optional[str] = None,
-) -> Optional[str]:
-    """Wrap an HLS/DASH manifest URL in a signed /proxy/relay link if relay
-    proxying is on. Returns the URL unchanged otherwise.
-
-    Manifest URLs from googlevideo are time-limited and IP-bound just like
-    individual segment URLs, so they need the same off-LAN handling.
-    """
-    if not url or proxy_mode != "relay" or not base_url:
-        return url
-    from routers.proxy import signed_relay_url
-
-    return signed_relay_url(base_url, url, content_type=content_type)
 
 
 def get_author_thumbnail_url(info: dict) -> Optional[str]:
@@ -179,11 +160,10 @@ def ytdlp_to_video_response(
         videoThumbnails=convert_thumbnails(info.get("thumbnails")),
         liveNow=info.get("is_live") or False,
         isUpcoming=info.get("is_upcoming") or False,
-        hlsUrl=_maybe_relay_manifest(
+        hlsUrl=relay_manifest_url(
             info.get("manifest_url") if info.get("is_live") else None,
             base_url=base_url,
             proxy_mode=effective_proxy_mode,
-            content_type="application/vnd.apple.mpegurl",
         ),
         formatStreams=format_streams,
         adaptiveFormats=adaptive_formats,

@@ -13,6 +13,8 @@ from converters._helpers import (
     _filter_sensitive_headers,
     _label_to_lang_code,
     _xtags_from_url,
+    is_hls_manifest,
+    relay_manifest_url,
     resolve_invidious_url,
 )
 from models import (
@@ -64,10 +66,18 @@ def invidious_to_video_response(
     def _proxy_url(invidious_url: str, itag: str, content_type: Optional[str] = None) -> str:
         """Pick the URL the client will hit for one Invidious-extracted stream.
 
+        - HLS manifests: signed /proxy/relay in both proxy modes, because the
+          relay is what rewrites the playlist body (see relay_manifest_url)
         - relay: resolve to absolute URL, then sign it for /proxy/relay
         - download: legacy /proxy/fast/{video_id}?itag=… (re-extracts via yt-dlp)
         - off: passthrough, with /videoplayback resolved against the Invidious base
         """
+        if effective_proxy_mode != "off" and invidious_url and is_hls_manifest(content_type, invidious_url):
+            return relay_manifest_url(
+                resolve_invidious_url(invidious_url, invidious_base_url),
+                base_url=base_url,
+                proxy_mode=effective_proxy_mode,
+            )
         if effective_proxy_mode == "relay" and base_url and invidious_url:
             from routers.proxy import signed_relay_url
 
@@ -255,16 +265,11 @@ def invidious_to_video_response(
 
     hls_url = info.get("hlsUrl")
     if hls_url:
-        if effective_proxy_mode == "relay" and base_url:
-            from routers.proxy import signed_relay_url
-
-            hls_url = signed_relay_url(
-                base_url,
-                resolve_invidious_url(hls_url, invidious_base_url),
-                content_type="application/vnd.apple.mpegurl",
-            )
-        else:
-            hls_url = resolve_invidious_url(hls_url, invidious_base_url)
+        hls_url = relay_manifest_url(
+            resolve_invidious_url(hls_url, invidious_base_url),
+            base_url=base_url,
+            proxy_mode=effective_proxy_mode,
+        )
 
     dash_url = info.get("dashUrl")
     if dash_url:

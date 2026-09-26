@@ -371,7 +371,21 @@ def _enrich_with_innertube_next(response: VideoResponse, it_video: dict) -> None
 
 @router.get("/extract", response_model=VideoResponse)
 async def extract_video_url(
-    request: Request, url: str = Query(..., description="URL to extract video from (any site yt-dlp supports)")
+    request: Request,
+    url: str = Query(..., description="URL to extract video from (any site yt-dlp supports)"),
+    proxy: Optional[bool] = Query(None, description="Override site proxy_streaming setting (true=proxy, false=direct)"),
+    proxy_mode: Optional[str] = Query(
+        None,
+        description=(
+            "How to proxy stream URLs when proxying is on. "
+            "'download' (default): /proxy/fast/ — downloads via yt-dlp, caches on disk (right shape for downloads). "
+            "'relay': /proxy/relay — byte-relay, supports Range, no disk write (right shape for playback). "
+            "'off': bypass proxying entirely. "
+            "Ignored when the per-site proxy_streaming flag (or ?proxy=) is off. "
+            "HLS manifests use /proxy/relay in every mode except 'off'."
+        ),
+        pattern="^(relay|download|off)$",
+    ),
 ):
     """Extract video details from any URL that yt-dlp supports.
 
@@ -386,6 +400,8 @@ async def extract_video_url(
 
     Args:
         url: Full URL to extract (e.g., https://vimeo.com/12345)
+        proxy: Override the site's proxy_streaming setting
+        proxy_mode: Which proxy endpoint to use when proxying is on
     """
     # Validate URL format
     if not is_valid_url(url):
@@ -411,14 +427,21 @@ async def extract_video_url(
         validate_extractor_allowed(extractor)
 
         site_config = database.get_site_by_extractor(extractor)
-        proxy_streams = site_config.get("proxy_streaming", True) if site_config else True
-        # `extract_url` is the share-extension / external-URL flow; downloads
-        # of arbitrary sites benefit from the on-disk caching of /proxy/fast/,
-        # so default to "download" mode here rather than "relay".
-        ext_proxy_mode = "download" if proxy_streams else "off"
+        site_proxy_streaming = site_config.get("proxy_streaming", True) if site_config else True
+        proxy_streams = proxy if proxy is not None else site_proxy_streaming
+
+        # `extract_url` is the share-extension / external-URL flow; downloads of
+        # arbitrary sites benefit from the on-disk caching of /proxy/fast/, so
+        # the default stays "download". Playback clients ask for "relay".
+        if not proxy_streams:
+            effective_proxy_mode = "off"
+        elif proxy_mode in ("relay", "download"):
+            effective_proxy_mode = proxy_mode
+        else:
+            effective_proxy_mode = "download"
 
         response = ytdlp_to_video_response(
-            info, base_url, proxy_streams=proxy_streams, proxy_mode=ext_proxy_mode,
+            info, base_url, proxy_streams=proxy_streams, proxy_mode=effective_proxy_mode,
             original_url=url, user_id=user_id,
         )
         return response

@@ -6,6 +6,7 @@ fs.mkdirSync(vendorDir, { recursive: true });
 
 const files = [
   ["node_modules/alpinejs/dist/cdn.min.js", "static/vendor/alpine.min.js"],
+  ["node_modules/hls.js/dist/hls.min.js", "static/vendor/hls.min.js"],
   ["node_modules/video.js/dist/video.min.js", "static/vendor/video.min.js"],
   ["node_modules/video.js/dist/video-js.css", "static/vendor/video-js.css"],
 ];
