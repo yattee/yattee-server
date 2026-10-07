@@ -19,6 +19,7 @@ import avatar_cache
 import config
 import cookie_health
 import database
+import egress_diagnostics
 import env_provisioning
 import feed_fetcher
 import invidious_proxy
@@ -37,6 +38,16 @@ async def lifespan(app: FastAPI):
     database.init_db()
     # Startup: Auto-provision admin user and settings from env vars
     env_provisioning.apply_env_provisioning()
+    # Startup: report (without credentials) whether the YouTube egress proxy is usable
+    # Diagnostic only: runs in the background with hard timeouts and never gates startup.
+    try:
+        _s = get_settings()
+        if _s.yt_egress_proxy_enabled and _s.yt_egress_proxy:
+            app.state.egress_preflight_task = asyncio.create_task(
+                egress_diagnostics.log_proxy_preflight(_s.yt_egress_proxy)
+            )
+    except Exception as e:
+        logger.warning("[Egress] could not schedule preflight: %s", type(e).__name__)
     # Startup: Start the bundled POT provider if enabled
     await pot_provider.manager.apply_settings(get_settings())
     cookie_health.start_task()
@@ -48,6 +59,9 @@ async def lifespan(app: FastAPI):
     # Startup: Start avatar cache cleanup task
     avatar_cache.start_avatar_cleanup_task()
     yield
+    preflight = getattr(app.state, "egress_preflight_task", None)
+    if preflight is not None and not preflight.done():
+        preflight.cancel()
     # Shutdown: Stop the POT provider process
     cookie_health.stop_task()
     await pot_provider.manager.stop()

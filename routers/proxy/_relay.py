@@ -40,6 +40,7 @@ import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+import egress
 import tokens as token_utils
 from egress import is_youtube_url, local_address_for
 from routers.proxy._streaming import router
@@ -373,10 +374,21 @@ async def relay(
     # an explicit transport would also disable HTTP(S)_PROXY env mounts.
     # proxy and local_addr are never both set: effective_ip_family() returns
     # "auto" while the proxy is active (httpx drops local_address otherwise).
+    #
+    # googlevideo URLs are minted for the egress IP that extracted them, so a
+    # YouTube-family fetch MUST leave through the same configured proxy.
     transport = None
+    configured_proxy: Optional[str] = None
     if is_youtube_url(url):
         s = get_settings()
-        proxy = s.effective_yt_egress_proxy()
+        try:
+            proxy = s.effective_yt_egress_proxy()
+        except egress.ProxyConfigError as e:
+            logger.error("[Egress] stage=googlevideo-relay cause=invalid-proxy-config error=%s", e)
+            raise HTTPException(
+                status_code=502, detail="YouTube egress proxy configuration is invalid"
+            ) from e
+        configured_proxy = s.yt_egress_proxy if proxy else None
         local_addr = local_address_for(s.effective_ip_family())
         if proxy or local_addr:
             transport = httpx.AsyncHTTPTransport(proxy=proxy, local_address=local_addr)
@@ -398,8 +410,16 @@ async def relay(
         meta = await client.send(meta_req, stream=True)
     except httpx.RequestError as e:
         await client.aclose()
-        logger.warning(f"[Relay] Upstream connect failed for {url[:120]}: {e}")
-        raise HTTPException(status_code=502, detail=f"Upstream connect failed: {e}") from e
+        safe_error = egress.redact_secrets(str(e), configured_proxy)
+        if configured_proxy:
+            logger.warning(
+                "[Egress] stage=googlevideo-relay cause=%s proxy=%s error=%s",
+                egress.classify_egress_failure(f"{type(e).__name__} {safe_error}", proxy_configured=True),
+                egress.redact_proxy_url(configured_proxy),
+                type(e).__name__,
+            )
+        logger.warning(f"[Relay] Upstream connect failed for {url[:120]}: {safe_error}")
+        raise HTTPException(status_code=502, detail=f"Upstream connect failed: {safe_error}") from e
 
     upstream_content_type = meta.headers.get("content-type", "")
     response_content_type = (ct or upstream_content_type or "").split(";")[0].strip().lower()

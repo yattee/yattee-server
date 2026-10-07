@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 import database
+import egress
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,8 @@ class Settings(BaseModel):
         default=None,
         description=(
             "HTTP/SOCKS proxy for YouTube-bound traffic. "
-            "Format: http://[user:pass@]host:port or socks5://host:port"
+            "Format: scheme://[user:password@]host:port (credentials may contain reserved "
+            "characters; they are percent-encoded automatically)"
         ),
     )
     yt_ip_family: Literal["auto", "ipv4", "ipv6"] = Field(
@@ -138,8 +140,16 @@ class Settings(BaseModel):
 
 
     def effective_yt_egress_proxy(self) -> Optional[str]:
-        """Return the egress proxy URL only if both configured and enabled."""
-        return self.yt_egress_proxy if self.yt_egress_proxy_enabled and self.yt_egress_proxy else None
+        """Return the NORMALIZED egress proxy URL if configured and enabled.
+
+        This is the single source every YouTube client consumes (yt-dlp,
+        InnerTube, /proxy/relay), so they all see the same, correctly encoded
+        value. A configured-but-malformed proxy raises egress.ProxyConfigError
+        instead of silently falling back to direct (datacenter) egress.
+        """
+        if not (self.yt_egress_proxy_enabled and self.yt_egress_proxy):
+            return None
+        return egress.normalize_proxy_url(self.yt_egress_proxy)
 
     def effective_pot_provider_url(self) -> Optional[str]:
         """Return the external POT provider URL, or None (bundled provider implied)."""
