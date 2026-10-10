@@ -16,6 +16,14 @@ document.addEventListener('alpine:init', () => {
         yt_ip_family: 'auto',
         yt_pot_enabled: false,
         yt_pot_provider_url: '',
+        hls_filter_enabled: true,
+        hls_audio_language: '',
+        hls_min_height: 0,
+        hls_max_height: 0,
+        hls_dash_enabled: true,
+        hls_dash_audio_languages: '',
+        hls_dash_prefer_av1: false,
+        hls_dash_relay: true,
 
         innertube_enabled: true,
 
@@ -78,6 +86,14 @@ document.addEventListener('alpine:init', () => {
                 this.yt_ip_family = settings.yt_ip_family || 'auto';
                 this.yt_pot_enabled = settings.yt_pot_enabled || false;
                 this.yt_pot_provider_url = settings.yt_pot_provider_url || '';
+                this.hls_filter_enabled = settings.hls_filter_enabled !== false;
+                this.hls_audio_language = settings.hls_audio_language || '';
+                this.hls_min_height = settings.hls_min_height || 0;
+                this.hls_max_height = settings.hls_max_height || 0;
+                this.hls_dash_enabled = settings.hls_dash_enabled !== false;
+                this.hls_dash_audio_languages = settings.hls_dash_audio_languages || '';
+                this.hls_dash_prefer_av1 = settings.hls_dash_prefer_av1 === true;
+                this.hls_dash_relay = settings.hls_dash_relay !== false;
                 this.innertube_enabled = settings.innertube_enabled !== false;
                 this.invidious_enabled = settings.invidious_enabled !== false;
                 this.invidious_instance = settings.invidious_instance || '';
@@ -133,6 +149,14 @@ document.addEventListener('alpine:init', () => {
                     yt_ip_family: this.yt_ip_family || 'auto',
                     yt_pot_enabled: this.yt_pot_enabled,
                     yt_pot_provider_url: this.yt_pot_provider_url || null,
+                    hls_filter_enabled: this.hls_filter_enabled,
+                    hls_audio_language: (this.hls_audio_language || '').trim() || null,
+                    hls_min_height: parseInt(this.hls_min_height) || 0,
+                    hls_max_height: parseInt(this.hls_max_height) || 0,
+                    hls_dash_enabled: this.hls_dash_enabled,
+                    hls_dash_audio_languages: (this.hls_dash_audio_languages || '').trim() || null,
+                    hls_dash_prefer_av1: this.hls_dash_prefer_av1,
+                    hls_dash_relay: this.hls_dash_relay,
                     innertube_enabled: this.innertube_enabled,
                     invidious_enabled: this.invidious_enabled,
                     invidious_instance: this.invidious_instance || null,
