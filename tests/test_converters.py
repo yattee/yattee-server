@@ -3,6 +3,8 @@
 import os
 import sys
 
+import pytest
+
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -27,6 +29,7 @@ from converters import (
     parse_upload_date,
     resolve_invidious_url,
     ytdlp_to_video_list_item,
+    ytdlp_to_video_response,
 )
 
 # =============================================================================
@@ -703,6 +706,192 @@ class TestConvertFormats:
         ]
         format_streams, _ = convert_formats(formats, video_id="abc123", proxy_base_url="http://localhost:8080/proxy")
         assert "http://localhost:8080/proxy/fast/abc123?itag=18" in format_streams[0].url
+
+    def test_hls_manifest_relayed_in_download_mode(self):
+        """An HLS manifest takes the relay even when proxy_mode is "download".
+
+        /proxy/fast/ would serve the playlist unmodified, so its segments would
+        still point at the CDN. Only the relay rewrites the playlist body.
+        """
+        formats = [
+            {
+                "format_id": "18",
+                "ext": "mp4",
+                "url": "https://example.com/video.mp4",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+            },
+            {
+                "format_id": "602",
+                "ext": "mp4",
+                "protocol": "m3u8",
+                "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1",
+                "url": "https://manifest.googlevideo.com/api/manifest/hls_playlist?id=1",
+            },
+        ]
+        format_streams, _ = convert_formats(
+            formats,
+            video_id="abc123",
+            proxy_base_url="http://localhost:8080/proxy",
+            proxy_mode="download",
+            base_url="http://localhost:8080",
+        )
+        by_itag = {stream.itag: stream for stream in format_streams}
+        assert by_itag["18"].url.startswith("http://localhost:8080/proxy/fast/abc123?itag=18")
+        assert by_itag["602"].container == "hls"
+        assert by_itag["602"].url.startswith("http://localhost:8080/proxy/relay?")
+        assert "manifest.googlevideo.com" in by_itag["602"].url
+
+    def test_hls_manifest_relayed_in_relay_mode(self):
+        """An HLS manifest is relayed in relay mode too."""
+        formats = [
+            {
+                "format_id": "602",
+                "ext": "mp4",
+                "protocol": "m3u8",
+                "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1",
+            }
+        ]
+        format_streams, _ = convert_formats(
+            formats,
+            video_id="abc123",
+            proxy_base_url="http://localhost:8080/proxy",
+            proxy_mode="relay",
+            base_url="http://localhost:8080",
+        )
+        assert len(format_streams) == 1
+        assert format_streams[0].url.startswith("http://localhost:8080/proxy/relay?")
+
+    def test_hls_manifest_direct_when_proxying_off(self):
+        """Without proxying the manifest URL stays as extracted."""
+        manifest_url = "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1"
+        formats = [
+            {
+                "format_id": "602",
+                "ext": "mp4",
+                "protocol": "m3u8",
+                "manifest_url": manifest_url,
+            }
+        ]
+        format_streams, _ = convert_formats(formats, video_id="abc123", proxy_mode="off")
+        assert len(format_streams) == 1
+        assert format_streams[0].url == manifest_url
+
+
+# =============================================================================
+# Tests for manifest relay wrapping on the yt-dlp and Invidious paths
+# =============================================================================
+
+
+LIVE_MANIFEST_URL = "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1"
+
+
+class TestYtdlpHlsManifest:
+    """hlsUrl takes the relay in every proxy mode except off."""
+
+    def _live_info(self):
+        return {
+            "id": "abc123",
+            "title": "Live stream",
+            "is_live": True,
+            "manifest_url": LIVE_MANIFEST_URL,
+            "formats": [],
+        }
+
+    def test_relayed_in_download_mode(self):
+        """A live manifest must be relayed even when the mode is download."""
+        response = ytdlp_to_video_response(
+            self._live_info(),
+            base_url="http://localhost:8080",
+            proxy_streams=True,
+            proxy_mode="download",
+        )
+        assert response.hlsUrl.startswith("http://localhost:8080/proxy/relay?")
+        assert "manifest.googlevideo.com" in response.hlsUrl
+
+    def test_relayed_in_relay_mode(self):
+        """The relay is used in relay mode as well."""
+        response = ytdlp_to_video_response(
+            self._live_info(),
+            base_url="http://localhost:8080",
+            proxy_streams=True,
+            proxy_mode="relay",
+        )
+        assert response.hlsUrl.startswith("http://localhost:8080/proxy/relay?")
+
+    def test_direct_when_proxying_off(self):
+        """With proxying off the manifest URL stays as extracted."""
+        response = ytdlp_to_video_response(
+            self._live_info(),
+            base_url="http://localhost:8080",
+            proxy_streams=False,
+            proxy_mode="off",
+        )
+        assert response.hlsUrl == LIVE_MANIFEST_URL
+
+
+class TestInvidiousHlsFormat:
+    """Invidious-shaped HLS entries use the relay, other streams keep the mode."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, test_db):
+        """invidious_to_video_response() reads its settings from the database."""
+
+    def _info(self):
+        return {
+            "videoId": "abc123",
+            "formatStreams": [
+                {
+                    "itag": "18",
+                    "type": 'video/mp4; codecs="avc1,mp4a"',
+                    "container": "mp4",
+                    "quality": "360p",
+                    "url": "https://cdn.example.com/video.mp4",
+                },
+                {
+                    "itag": "602",
+                    "type": "application/vnd.apple.mpegurl",
+                    "container": "hls",
+                    "quality": "144p",
+                    "url": LIVE_MANIFEST_URL,
+                },
+            ],
+        }
+
+    def test_download_mode_relays_the_manifest_only(self):
+        result = invidious_to_video_response(
+            self._info(),
+            base_url="http://localhost:8080",
+            proxy_streams=True,
+            proxy_mode="download",
+            invidious_base_url="",
+        )
+        by_itag = {stream.itag: stream for stream in result.formatStreams}
+        assert by_itag["18"].url.startswith("http://localhost:8080/proxy/fast/abc123?itag=18")
+        assert by_itag["602"].url.startswith("http://localhost:8080/proxy/relay?")
+
+    def test_relay_mode_relays_both(self):
+        result = invidious_to_video_response(
+            self._info(),
+            base_url="http://localhost:8080",
+            proxy_streams=True,
+            proxy_mode="relay",
+            invidious_base_url="",
+        )
+        for stream in result.formatStreams:
+            assert stream.url.startswith("http://localhost:8080/proxy/relay?")
+
+    def test_proxying_off_keeps_direct_urls(self):
+        result = invidious_to_video_response(
+            self._info(),
+            base_url="http://localhost:8080",
+            proxy_streams=False,
+            proxy_mode="off",
+            invidious_base_url="",
+        )
+        by_itag = {stream.itag: stream for stream in result.formatStreams}
+        assert by_itag["18"].url == "https://cdn.example.com/video.mp4"
+        assert by_itag["602"].url == LIVE_MANIFEST_URL
 
 
 # =============================================================================

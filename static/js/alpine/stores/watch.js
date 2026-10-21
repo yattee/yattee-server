@@ -70,7 +70,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 this.loadingStep = 'Extracting video information...';
 
-                const response = await fetch(`/api/v1/extract?url=${encodeURIComponent(url)}`, {
+                const response = await fetch(`/api/v1/extract?url=${encodeURIComponent(url)}&proxy_mode=relay`, {
                     credentials: 'same-origin'
                 });
 

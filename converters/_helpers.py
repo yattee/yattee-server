@@ -43,6 +43,44 @@ def _filter_sensitive_headers(headers: Optional[Dict[str, str]]) -> Optional[Dic
     return filtered if filtered else None
 
 
+HLS_MANIFEST_CONTENT_TYPE = "application/vnd.apple.mpegurl"
+
+# MIME types that identify an HLS playlist (master or media) rather than media
+HLS_MIME_TYPES = (HLS_MANIFEST_CONTENT_TYPE, "application/x-mpegurl")
+
+
+def is_hls_manifest(content_type: Optional[str], url: str) -> bool:
+    """Return True when the stream URL is an HLS playlist, not media."""
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime in HLS_MIME_TYPES:
+        return True
+    return url.split("?", 1)[0].endswith(".m3u8")
+
+
+def relay_manifest_url(
+    url: Optional[str],
+    *,
+    base_url: str,
+    proxy_mode: str,
+    content_type: str = HLS_MANIFEST_CONTENT_TYPE,
+) -> Optional[str]:
+    """Wrap a manifest URL in a signed /proxy/relay link when proxying is on.
+
+    Manifests always take the relay, in both proxy modes - not only in
+    ``"relay"``. A client cannot fetch a manifest straight from the CDN (the
+    browser blocks it, because the CDN sends no CORS headers), and
+    ``/proxy/fast/`` would serve the playlist unmodified, so the segments inside
+    it would still point at the CDN - which answers 403 to every client on a
+    different network than the server. ``/proxy/relay`` rewrites the segment
+    URLs in the body, so the whole stream stays relayed.
+    """
+    if not url or proxy_mode == "off" or not base_url:
+        return url
+    from routers.proxy import signed_relay_url
+
+    return signed_relay_url(base_url, url, content_type=content_type)
+
+
 # Language name to code mapping for caption conversion
 _LANG_NAME_TO_CODE = {
     "english": "en",

@@ -1,6 +1,7 @@
 document.addEventListener('alpine:init', () => {
     Alpine.data('videoPlayer', () => ({
         player: null,
+        hls: null,
         qualities: [],
         audioTracks: [],
         selectedQuality: '',
@@ -44,6 +45,7 @@ document.addEventListener('alpine:init', () => {
             if (this._keyboardHandler) {
                 document.removeEventListener('keydown', this._keyboardHandler);
             }
+            this.detachHls();
             if (this.player) {
                 this.player.dispose();
                 this.player = null;
@@ -52,6 +54,7 @@ document.addEventListener('alpine:init', () => {
 
         initPlayer(data) {
             // Dispose existing player
+            this.detachHls();
             if (this.player) {
                 this.player.dispose();
                 this.player = null;
@@ -114,20 +117,29 @@ document.addEventListener('alpine:init', () => {
                     itag: 'hls',
                     label: 'Auto (HLS)',
                     url: data.hlsUrl,
-                    type: 'application/x-mpegURL'
+                    type: 'application/x-mpegURL',
+                    isHls: true
                 });
             }
 
             // Add muxed formats (formatStreams)
             if (data.formatStreams && data.formatStreams.length > 0) {
                 data.formatStreams.forEach(f => {
+                    const isHls = this.isHlsFormat(f);
+                    // The same playlist as the hlsUrl entry above
+                    if (isHls && data.hlsUrl) {
+                        return;
+                    }
                     const label = f.quality || f.resolution || 'Unknown';
                     this.qualities.push({
                         itag: f.itag,
-                        label: `${label} (${f.container})`,
+                        // An HLS entry is a playlist, not a rendition. Its
+                        // quality label describes only the master playlist.
+                        label: isHls ? 'Auto (HLS)' : `${label} (${f.container})`,
                         url: f.url,
                         type: this.getMimeType(f),
-                        container: f.container
+                        container: f.container,
+                        isHls: isHls
                     });
                 });
             }
@@ -196,15 +208,30 @@ document.addEventListener('alpine:init', () => {
 
             // Set default selections
             if (this.qualities.length > 0) {
-                // Prefer HLS, then best muxed format, then best adaptive
-                const hlsFormat = this.qualities.find(q => q.itag === 'hls');
-                const muxedFormat = this.qualities.find(q => !q.isAdaptive && q.itag !== 'hls');
+                // Prefer HLS: it carries the video and the audio together and
+                // lets the player switch renditions. Then the best muxed format.
+                const hlsFormat = this.qualities.find(q => q.isHls);
+                const muxedFormat = this.qualities.find(q => !q.isAdaptive && !q.isHls);
                 this.selectedQuality = hlsFormat?.itag || muxedFormat?.itag || this.qualities[0].itag;
             }
 
             if (this.audioTracks.length > 0) {
                 this.selectedAudio = this.audioTracks[0].itag;
             }
+        },
+
+        isHlsFormat(format) {
+            const type = (format.type || '').toLowerCase();
+            return (
+                format.container === 'hls' ||
+                type.indexOf('mpegurl') !== -1 ||
+                type.indexOf('m3u8') !== -1
+            );
+        },
+
+        get isHlsSelected() {
+            const quality = this.qualities.find(q => q.itag === this.selectedQuality);
+            return !!(quality && quality.isHls);
         },
 
         codecPriority(type) {
@@ -253,7 +280,8 @@ document.addEventListener('alpine:init', () => {
             if (data.hlsUrl) {
                 source = {
                     src: data.hlsUrl,
-                    type: 'application/x-mpegURL'
+                    type: 'application/x-mpegURL',
+                    isHls: true
                 };
             }
             // Try selected quality
@@ -262,7 +290,8 @@ document.addEventListener('alpine:init', () => {
                 if (quality) {
                     source = {
                         src: quality.url,
-                        type: quality.type || 'video/mp4'
+                        type: quality.type || 'video/mp4',
+                        isHls: !!quality.isHls
                     };
                 }
             }
@@ -271,7 +300,8 @@ document.addEventListener('alpine:init', () => {
                 const f = data.formatStreams[0];
                 source = {
                     src: f.url,
-                    type: this.getMimeType(f)
+                    type: this.getMimeType(f),
+                    isHls: this.isHlsFormat(f)
                 };
             }
             // Fallback to first adaptive format
@@ -280,14 +310,14 @@ document.addEventListener('alpine:init', () => {
                 if (videoFormat) {
                     source = {
                         src: videoFormat.url,
-                        type: videoFormat.type
+                        type: videoFormat.type,
+                        isHls: false
                     };
                 }
             }
 
             if (source) {
-                this.currentSource = source;
-                this.player.src(source);
+                this.applySource(source);
 
                 // Set poster
                 if (data.videoThumbnails && data.videoThumbnails.length > 0) {
@@ -301,26 +331,133 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        // HLS plays through hls.js, not through video.js's built-in VHS.
+        // YouTube's media playlists carry no EXT-X-MAP init segment, which VHS
+        // needs - it appends nothing and the player waits forever. hls.js plays
+        // the same stream, alternate audio track included.
+        applySource(source, restore) {
+            this.currentSource = source;
+
+            if (source.isHls && this.canUseHls()) {
+                this.attachHls(source.src, restore);
+                return;
+            }
+
+            this.detachHls();
+            if (restore) {
+                this.player.one('loadedmetadata', () => this.restorePlayback(restore));
+            }
+            this.player.src({
+                src: source.src,
+                type: source.type
+            });
+        },
+
+        canUseHls() {
+            return typeof Hls !== 'undefined' && Hls.isSupported();
+        },
+
+        attachHls(url, restore) {
+            this.detachHls();
+            const hls = new Hls({ enableWorker: true });
+            this.hls = hls;
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                console.error('[Player] HLS error:', data.type, data.details, 'fatal=' + data.fatal);
+            });
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                this.useHlsLevels(hls.levels);
+                if (!restore && Alpine.store('watch').autoplay) {
+                    this.player.play();
+                }
+            });
+            if (restore) {
+                this.player.one('loadedmetadata', () => this.restorePlayback(restore));
+            }
+            hls.attachMedia(this.$refs.videoElement);
+            hls.loadSource(url);
+        },
+
+        detachHls() {
+            if (this.hls) {
+                this.hls.destroy();
+                this.hls = null;
+            }
+        },
+
+        // While HLS is in use the menu lists the HLS levels. The DASH entries
+        // carry no audio of their own, so picking one of those silences
+        // playback; an HLS level switch keeps the audio track and the position.
+        useHlsLevels(levels) {
+            const previous = this.qualities.find(q => q.itag === this.selectedQuality);
+            const wanted = previous && typeof previous.level === 'number' ? previous.level : -1;
+
+            // The master playlist is ordered by bandwidth, which puts 144p in the
+            // middle and the best renditions last. Show them largest first, like
+            // the rest of the menu used to be, and keep the hls.js level index so
+            // currentLevel still points at the right rendition. Same resolution
+            // and codec twice (SDR/HDR, alternate audio groups) keeps the first,
+            // which is the highest bitrate after the sort.
+            const seen = new Set();
+            const entries = [];
+            levels
+                .map((level, index) => ({ level: level, index: index, label: this.hlsLevelLabel(level) }))
+                .sort((a, b) =>
+                    (b.level.height || 0) - (a.level.height || 0) ||
+                    (b.level.frameRate || 0) - (a.level.frameRate || 0) ||
+                    (b.level.bitrate || 0) - (a.level.bitrate || 0)
+                )
+                .forEach(entry => {
+                    if (seen.has(entry.label)) return;
+                    seen.add(entry.label);
+                    entries.push({ itag: `hls-${entry.index}`, label: entry.label, level: entry.index, isHls: true });
+                });
+
+            this.qualities = [{ itag: 'hls', label: 'Auto (HLS)', level: -1, isHls: true }].concat(entries);
+
+            this.selectedQuality = wanted >= 0 && wanted < levels.length ? `hls-${wanted}` : 'hls';
+            this.applyHlsLevel(this.selectedQuality === 'hls' ? -1 : wanted);
+        },
+
+        hlsLevelLabel(level) {
+            const attrs = level.attrs || {};
+            const height = level.height || (attrs.RESOLUTION ? parseInt(attrs.RESOLUTION.split('x')[1], 10) : 0);
+            const fps = level.frameRate > 30 ? ` ${Math.round(level.frameRate)}fps` : '';
+            const codec = this.getCodecName(attrs.CODECS || level.videoCodec || '');
+            return `${height ? height + 'p' : 'Auto'}${fps} (${codec})`;
+        },
+
+        applyHlsLevel(level) {
+            if (!this.hls) return;
+            // -1 hands the choice back to hls.js's own adaptation
+            this.hls.currentLevel = level >= 0 && level < this.hls.levels.length ? level : -1;
+        },
+
+        restorePlayback(restore) {
+            this.player.currentTime(restore.time);
+            if (restore.playing) {
+                this.player.play();
+            }
+        },
+
         changeQuality() {
             if (!this.player || !this.selectedQuality) return;
 
             const quality = this.qualities.find(q => q.itag === this.selectedQuality);
             if (!quality) return;
 
-            const currentTime = this.player.currentTime();
-            const wasPlaying = !this.player.paused();
+            if (quality.isHls && this.hls) {
+                this.applyHlsLevel(typeof quality.level === 'number' ? quality.level : -1);
+                return;
+            }
 
-            this.player.src({
-                src: quality.url,
-                type: quality.type || 'video/mp4'
-            });
-
-            this.player.one('loadedmetadata', () => {
-                this.player.currentTime(currentTime);
-                if (wasPlaying) {
-                    this.player.play();
-                }
-            });
+            this.applySource(
+                {
+                    src: quality.url,
+                    type: quality.type || 'video/mp4',
+                    isHls: !!quality.isHls
+                },
+                { time: this.player.currentTime(), playing: !this.player.paused() }
+            );
         },
 
         changeAudio() {

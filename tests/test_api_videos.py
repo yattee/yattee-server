@@ -598,6 +598,73 @@ class TestExtractVideo:
         data = response.json()
         assert data["originalUrl"] == original_url
 
+    def _extract_with(self, formats, query=""):
+        """Run /api/v1/extract against a stubbed extraction result."""
+        video_info = {
+            "id": "12345",
+            "title": "Sample Video",
+            "extractor": "vimeo",
+            "formats": formats,
+        }
+        with patch("routers.videos.extract_url", new_callable=AsyncMock) as mock_extract:
+            mock_extract.return_value = video_info
+            with patch("routers.videos.get_settings") as mock_settings:
+                mock_settings.return_value = MagicMock(allow_all_sites_for_extraction=True)
+                return self.client.get(f"/api/v1/extract?url=https://vimeo.com/12345{query}")
+
+    @staticmethod
+    def _muxed_format():
+        return {
+            "format_id": "hd",
+            "ext": "mp4",
+            "url": "https://vimeo.com/video.mp4",
+            "width": 1280,
+            "height": 720,
+            "vcodec": "avc1",
+            "acodec": "mp4a",
+        }
+
+    @staticmethod
+    def _hls_format():
+        return {
+            "format_id": "602",
+            "ext": "mp4",
+            "protocol": "m3u8",
+            "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1",
+        }
+
+    def test_extract_video_proxy_mode_relay(self):
+        """proxy_mode=relay byte-relays the streams instead of caching them."""
+        response = self._extract_with([self._muxed_format()], query="&proxy_mode=relay")
+
+        assert response.status_code == 200
+        assert response.json()["formatStreams"][0]["url"].startswith("http://testserver/proxy/relay?")
+
+    def test_extract_video_defaults_to_download_mode(self):
+        """Without proxy_mode the download path stays the default."""
+        response = self._extract_with([self._muxed_format()])
+
+        assert response.status_code == 200
+        assert response.json()["formatStreams"][0]["url"].startswith("http://testserver/proxy/fast/")
+
+    def test_extract_video_relays_hls_manifest_in_download_mode(self):
+        """An HLS manifest is relayed even when proxy_mode is download."""
+        response = self._extract_with([self._muxed_format(), self._hls_format()])
+
+        assert response.status_code == 200
+        by_itag = {stream["itag"]: stream for stream in response.json()["formatStreams"]}
+        assert by_itag["hd"]["url"].startswith("http://testserver/proxy/fast/")
+        assert by_itag["602"]["url"].startswith("http://testserver/proxy/relay?")
+
+    def test_extract_video_proxy_false_returns_direct_urls(self):
+        """proxy=false turns proxying off for this request."""
+        response = self._extract_with([self._muxed_format(), self._hls_format()], query="&proxy=false")
+
+        assert response.status_code == 200
+        by_itag = {stream["itag"]: stream for stream in response.json()["formatStreams"]}
+        assert by_itag["hd"]["url"] == "https://vimeo.com/video.mp4"
+        assert by_itag["602"]["url"] == "https://manifest.googlevideo.com/api/manifest/hls_variant?id=1"
+
     @pytest.mark.skip(
         reason="HTTPException in validate_extractor_allowed is caught by generic Exception handler in router"
     )

@@ -109,6 +109,7 @@ async def list_sites(admin: dict = Depends(get_current_admin)):
             extractor_pattern=s["extractor_pattern"],
             enabled=bool(s["enabled"]),
             priority=s["priority"],
+            proxy_streaming=bool(s.get("proxy_streaming", True)),
             credential_count=s["credential_count"],
             stale_credential_count=s.get("stale_credential_count") or 0,
             cookie_validation_supported=credentials_module.match_site("youtube", s["extractor_pattern"]),

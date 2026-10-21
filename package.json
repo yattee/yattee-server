@@ -5,6 +5,7 @@
   },
   "dependencies": {
     "alpinejs": "3.14.3",
+    "hls.js": "1.7.3",
     "video.js": "8.10.0"
   },
   "devDependencies": {
