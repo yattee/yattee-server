@@ -5,6 +5,7 @@ import logging
 import auth
 import config
 import database
+import egress
 import settings as settings_module
 
 logger = logging.getLogger(__name__)
@@ -64,10 +65,22 @@ def _provision_egress_proxy():
         return
 
     s = settings_module.load_settings()
-    s.yt_egress_proxy = url
+    try:
+        # Store the canonical form (credentials percent-encoded) so every
+        # client — yt-dlp, InnerTube, relay — reads exactly the same value.
+        s.yt_egress_proxy = egress.normalize_proxy_url(url)
+    except egress.ProxyConfigError as e:
+        # Keep the raw value: the runtime fails CLOSED with a clear error
+        # instead of silently falling back to direct datacenter egress.
+        s.yt_egress_proxy = url
+        logger.error(
+            "ENV provisioning: YT_EGRESS_PROXY is malformed (%s); YouTube requests will fail "
+            "until it is fixed",
+            e,
+        )
     s.yt_egress_proxy_enabled = True
     settings_module.save_settings(s)
-    logger.info("ENV provisioning: configured YT egress proxy")
+    logger.info("ENV provisioning: configured YT egress proxy %s", egress.redact_proxy_url(url))
 
 
 def _provision_ip_family():

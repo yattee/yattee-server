@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+import egress
 from settings import get_settings
 from ytdlp_wrapper._sanitize import YtDlpError, is_valid_url
 
@@ -138,7 +139,11 @@ async def run_ytdlp_ex(
 
     # Build final args: network (proxy/IP family) + credentials + flags + '--' + urls
     # The '--' separator prevents URLs from being interpreted as flags
-    all_args = ytdlp_network_args(s) + list(cred_args) + flags
+    try:
+        network_args = ytdlp_network_args(s)
+    except egress.ProxyConfigError as e:
+        raise YtDlpError(f"YouTube egress proxy configuration is invalid: {e}", cookie_ids=cookie_ids) from e
+    all_args = network_args + list(cred_args) + flags
     if urls:
         all_args.append("--")
         all_args.extend(urls)
@@ -159,22 +164,71 @@ async def run_ytdlp_ex(
             credentials.cleanup_temp_files(temp_files)
         raise YtDlpError(f"yt-dlp timed out after {timeout} seconds", cookie_ids=cookie_ids)
 
-    # Clean up temp files
+    stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
+
+    # Keep the normal extractor path first because many videos already work.
+    # If YouTube selectively returns its anonymous-player bot check, retry only
+    # that failure through the mweb player. With POT enabled, bgutil supplies
+    # the matching GVS token through the configured provider.
+    bot_check = "sign in to confirm you" in stderr_text.lower() and "not a bot" in stderr_text.lower()
+    youtube_url = bool(url and ("youtube.com/" in url or "youtu.be/" in url))
+    has_player_client = any(
+        isinstance(arg, str) and arg.startswith("youtube:") and "player_client=" in arg.replace("-", "_")
+        for arg in flags
+    )
+    if proc.returncode != 0 and bot_check and youtube_url and s.yt_pot_enabled and not has_player_client:
+        logger.info("[Egress] stage=yt-dlp fallback=mweb+pot reason=youtube-bot-check")
+        retry_args = network_args + list(cred_args) + flags + [
+            "--extractor-args",
+            "youtube:player_client=mweb",
+        ]
+        if urls:
+            retry_args.append("--")
+            retry_args.extend(urls)
+        retry_proc = await asyncio.create_subprocess_exec(
+            s.ytdlp_path, *retry_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(retry_proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            retry_proc.kill()
+            await retry_proc.wait()
+            if temp_files:
+                import credentials
+
+                credentials.cleanup_temp_files(temp_files)
+            raise YtDlpError(f"yt-dlp mweb fallback timed out after {timeout} seconds", cookie_ids=cookie_ids)
+        proc = retry_proc
+        stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
+        if proc.returncode == 0:
+            logger.info("[Egress] stage=yt-dlp fallback=mweb+pot result=success")
+        else:
+            logger.warning("[Egress] stage=yt-dlp fallback=mweb+pot result=failed")
+
+    # Clean up credential files only after the optional retry because that
+    # retry may need to reuse the same cookie file.
     if temp_files:
         import credentials
 
         credentials.cleanup_temp_files(temp_files)
-
-    stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
     if cookie_ids:
         import cookie_health
 
         cookie_health.inspect_ytdlp_stderr(stderr_text, cookie_ids)
 
     if proc.returncode != 0:
+        # Never let the egress proxy URL / credentials reach logs or API errors.
+        raw_proxy = s.yt_egress_proxy if s.yt_egress_proxy_enabled else None
+        stderr_text = egress.redact_secrets(stderr_text, raw_proxy)
         error_msg = stderr_text or "Unknown error"
         logger.error(f"yt-dlp failed (exit code {proc.returncode}) for URL: {url}")
         logger.error(f"yt-dlp stderr: {error_msg}")
+        if raw_proxy:
+            logger.error(
+                "[Egress] stage=yt-dlp cause=%s proxy=%s",
+                egress.classify_egress_failure(error_msg, proxy_configured=True),
+                egress.redact_proxy_url(raw_proxy),
+            )
         raise YtDlpError(f"yt-dlp failed: {error_msg}", stderr=stderr_text, cookie_ids=cookie_ids)
 
     logger.debug(f"yt-dlp succeeded for URL: {url}")
