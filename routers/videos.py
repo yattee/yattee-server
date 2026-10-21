@@ -19,6 +19,7 @@ from converters import (
 )
 from innertube import InnerTubeError
 from models import ChannelExtractResponse, Thumbnail, VideoResponse
+from routers.proxy._hls_master import finalize_hls_streams
 from settings import get_settings
 from utils import get_base_url
 from ytdlp_wrapper import (
@@ -170,7 +171,7 @@ async def get_video(
         channel_id = data.get("authorId")
         if channel_id:
             avatar_cache.get_cache().schedule_background_fetch(channel_id)
-        return response
+        return await finalize_hls_streams(response, base_url=base_url)
 
     async def _via_hybrid() -> VideoResponse:
         response = await _get_video_hybrid(
@@ -179,7 +180,7 @@ async def get_video(
         )
         if response is None:
             raise HTTPException(status_code=404, detail="Video not found")
-        return response
+        return await finalize_hls_streams(response, base_url=base_url)
 
     # invidious=true: force Invidious, no fallback
     if invidious is True:
@@ -306,6 +307,14 @@ async def _get_video_hybrid(
         return response
 
     merged = {**it_video, "formatStreams": format_streams, "adaptiveFormats": adaptive_formats}
+    # InnerTube provides hlsManifestUrl only for live; surface yt-dlp HLS master
+    # playlist for VOD so the client gets ABR instead of a fixed DASH rendition.
+    if not merged.get("hlsUrl"):
+        from converters._ytdlp import _hls_manifest_url
+
+        hls_url = _hls_manifest_url(info)
+        if hls_url:
+            merged["hlsUrl"] = hls_url
     response = invidious_to_video_response(
         merged, base_url, proxy_streams=proxy_streams, proxy_mode=proxy_mode,
         invidious_base_url="", user_id=user_id,

@@ -27,6 +27,7 @@ from converters import (
     parse_upload_date,
     resolve_invidious_url,
     ytdlp_to_video_list_item,
+    ytdlp_to_video_response,
 )
 
 # =============================================================================
@@ -804,6 +805,79 @@ class TestYtdlpToVideoListItem:
         result = ytdlp_to_video_list_item(info)
         assert result.isUpcoming is True
 
+
+# =============================================================================
+# Tests for ytdlp_to_video_response HLS manifest handling
+# =============================================================================
+
+
+class TestYtdlpHlsManifest:
+    """Tests for the hlsUrl field of ytdlp_to_video_response."""
+
+    HLS_MASTER = "https://manifest.googlevideo.com/api/manifest/hls_variant/master.m3u8"
+
+    @staticmethod
+    def _info(**overrides):
+        """A minimal yt-dlp info dict with one https and one m3u8 rendition."""
+        info = {
+            "id": "abc123",
+            "title": "Test Video",
+            "duration": 120,
+            "formats": [
+                {
+                    "format_id": "137",
+                    "ext": "mp4",
+                    "url": "https://example.com/video.mp4",
+                    "protocol": "https",
+                    "width": 1920,
+                    "height": 1080,
+                    "vcodec": "avc1.640028",
+                    "acodec": "none",
+                },
+                {
+                    "format_id": "270",
+                    "ext": "mp4",
+                    "url": "https://example.com/hls/270.m3u8",
+                    "protocol": "m3u8_native",
+                    "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/master.m3u8",
+                    "width": 1920,
+                    "height": 1080,
+                    "vcodec": "avc1.640028",
+                    "acodec": "none",
+                },
+            ],
+        }
+        info.update(overrides)
+        return info
+
+    def test_vod_exposes_master_playlist_from_m3u8_formats(self):
+        """VOD: the master playlist is taken from the m3u8 renditions."""
+        result = ytdlp_to_video_response(self._info())
+        assert result.hlsUrl == self.HLS_MASTER
+
+    def test_live_still_prefers_top_level_manifest_url(self):
+        """Live: the top-level manifest_url keeps precedence (unchanged behaviour)."""
+        info = self._info(is_live=True, manifest_url="https://manifest/live.m3u8")
+        result = ytdlp_to_video_response(info)
+        assert result.hlsUrl == "https://manifest/live.m3u8"
+
+    def test_live_without_top_level_manifest_falls_back_to_formats(self):
+        """Live without a top-level manifest_url still finds the m3u8 one."""
+        result = ytdlp_to_video_response(self._info(is_live=True))
+        assert result.hlsUrl == self.HLS_MASTER
+
+    def test_no_m3u8_formats_leaves_hls_url_empty(self):
+        """Extractors without any HLS rendition must not gain an hlsUrl."""
+        info = self._info()
+        info["formats"] = [info["formats"][0]]
+        result = ytdlp_to_video_response(info)
+        assert result.hlsUrl is None
+
+    def test_m3u8_renditions_are_not_exposed_as_adaptive_formats(self):
+        """The m3u8 renditions are filtered out of adaptiveFormats, so the
+        master playlist is the only way a client can reach them."""
+        result = ytdlp_to_video_response(self._info())
+        assert [f.itag for f in result.adaptiveFormats] == ["137"]
 
 # =============================================================================
 # Tests for invidious_to_video_list_item
