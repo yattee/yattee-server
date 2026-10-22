@@ -46,6 +46,9 @@ class AdaptiveFormat(BaseModel):
     itag: str
     type: str
     container: str
+    # Byte ranges ("start-end") of the initialization and index sections, when known
+    init: Optional[str] = None
+    index: Optional[str] = None
     resolution: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
@@ -154,6 +157,7 @@ class ChannelListItem(BaseModel):
     type: str = "channel"
     authorId: str
     author: str
+    channelHandle: Optional[str] = None
     description: Optional[str] = None
     subCount: Optional[int] = None
     subCountText: Optional[str] = None

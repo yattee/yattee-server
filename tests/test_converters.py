@@ -26,6 +26,7 @@ from converters import (
     parse_cookies_to_header,
     parse_upload_date,
     resolve_invidious_url,
+    ytdlp_to_playlist_list_item,
     ytdlp_to_video_list_item,
 )
 
@@ -986,6 +987,23 @@ class TestInvidiousToPlaylistListItem:
         assert len(result.videos) == 1
         assert result.videos[0].videoId == "abc123"
 
+    def test_unknown_video_count(self):
+        """Test that an unknown video count doesn't fail validation."""
+        info = {"playlistId": "PL123", "title": "Test Playlist", "videoCount": None}
+        result = invidious_to_playlist_list_item(info, "")
+        assert result.videoCount == 0
+
+
+class TestYtdlpToPlaylistListItem:
+    """Tests for ytdlp_to_playlist_list_item function."""
+
+    def test_unknown_playlist_count(self):
+        """Test that a channel tab entry without a playlist count doesn't fail validation."""
+        info = {"id": "PL123", "title": "Test Playlist", "playlist_count": None}
+        result = ytdlp_to_playlist_list_item(info)
+        assert result.playlistId == "PL123"
+        assert result.videoCount == 0
+
 
 # =============================================================================
 # Tests for invidious_to_video_response caption processing
@@ -1613,3 +1631,133 @@ class TestDecodeXtags:
         })
         assert out["_xtags"] == {"acont": "original", "lang": "en-US"}
         assert _format_to_invidious({"itag": 137, "mimeType": "video/mp4"})["_xtags"] == {}
+
+
+class TestStreamByteRanges:
+    """DASH players need the byte ranges of the initialization and index sections."""
+
+    def test_format_to_invidious_converts_byte_ranges(self):
+        from innertube._converters import _format_to_invidious
+
+        out = _format_to_invidious({
+            "itag": 248,
+            "mimeType": 'video/webm; codecs="vp9"',
+            "initRange": {"start": "0", "end": "219"},
+            "indexRange": {"start": "220", "end": "1838"},
+        })
+        assert out["init"] == "0-219"
+        assert out["index"] == "220-1838"
+
+        without_ranges = _format_to_invidious({"itag": 248, "mimeType": 'video/webm; codecs="vp9"'})
+        assert without_ranges["init"] is None
+        assert without_ranges["index"] is None
+
+    def test_byte_ranges_survive_the_merge_and_the_response(self, test_db):
+        from converters._invidious import invidious_to_video_response
+        from innertube import merge_stream_urls
+
+        it = {
+            "formatStreams": [],
+            "adaptiveFormats": [{"itag": "140", "url": "", "container": "m4a", "init": "0-631", "index": "632-1595"}],
+        }
+        _fs, af = merge_stream_urls(it, [{"format_id": "140", "url": "https://gv/videoplayback?itag=140"}])
+        info = {
+            "videoId": "abc123def45",
+            "title": "Test",
+            "author": "Author",
+            "authorId": "UC123",
+            "lengthSeconds": 60,
+            "videoThumbnails": [],
+            "authorThumbnails": [],
+            "captions": [],
+            "formatStreams": [],
+            "adaptiveFormats": [{**af[0], "type": 'audio/mp4; codecs="mp4a.40.2"'}],
+        }
+
+        resp = invidious_to_video_response(info, base_url="http://localhost", proxy_streams=True, proxy_mode="relay")
+        assert resp.adaptiveFormats[0].url.startswith("http://localhost/proxy/relay?")
+        assert resp.adaptiveFormats[0].init == "0-631"
+        assert resp.adaptiveFormats[0].index == "632-1595"
+
+
+class TestRelayedHls:
+    """With relay proxying on, HLS manifests have to be relayed like the other streams."""
+
+    def _hls_format(self):
+        return {
+            "format_id": "96",
+            "protocol": "m3u8_native",
+            "url": "https://manifest.googlevideo.com/api/manifest/hls_playlist/id/abc/itag/96/index.m3u8",
+            "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/id/abc/file/index.m3u8",
+            "height": 1080,
+            "width": 1920,
+        }
+
+    def test_hls_format_streams_are_relayed(self):
+        from converters import convert_formats
+
+        format_streams, _ = convert_formats(
+            [self._hls_format()],
+            video_id="abc123def45",
+            proxy_base_url="http://localhost/proxy",
+            proxy_mode="relay",
+            base_url="http://localhost",
+        )
+        assert len(format_streams) == 1
+        assert format_streams[0].url.startswith("http://localhost/proxy/relay?")
+        assert "hls_variant" in format_streams[0].url
+
+    def test_hls_format_streams_stay_direct_without_proxying(self):
+        from converters import convert_formats
+
+        format_streams, _ = convert_formats([self._hls_format()], video_id="abc123def45")
+        assert format_streams[0].url == self._hls_format()["manifest_url"]
+
+    def test_live_streams_expose_their_relayed_manifest(self):
+        from converters import ytdlp_to_video_response
+
+        info = {
+            "id": "abc123def45",
+            "title": "Live",
+            "is_live": True,
+            "formats": [self._hls_format()],
+        }
+        resp = ytdlp_to_video_response(info, "http://localhost", proxy_streams=True, proxy_mode="relay")
+        assert resp.hlsUrl.startswith("http://localhost/proxy/relay?")
+        assert "hls_variant" in resp.hlsUrl
+
+        direct = ytdlp_to_video_response(info, "http://localhost", proxy_streams=False)
+        assert direct.hlsUrl == self._hls_format()["manifest_url"]
+
+
+class TestChannelSearchResults:
+    """YouTube shows a channel's handle where the subscriber count used to be."""
+
+    def _renderer(self, subscriber_count_text, video_count_text):
+        return {
+            "channelId": "UC123",
+            "title": {"simpleText": "Test Channel"},
+            "subscriberCountText": {"simpleText": subscriber_count_text},
+            "videoCountText": {"simpleText": video_count_text},
+        }
+
+    def test_handle_and_subscriber_count(self):
+        from innertube._converters import channel_renderer_to_invidious
+
+        result = invidious_to_channel_list_item(
+            channel_renderer_to_invidious(self._renderer("@testchannel", "1.2M subscribers"))
+        )
+        assert result.channelHandle == "@testchannel"
+        assert result.subCount == 1_200_000
+        assert result.subCountText == "1.2M subscribers"
+        assert result.videoCount is None
+
+    def test_legacy_layout(self):
+        from innertube._converters import channel_renderer_to_invidious
+
+        result = invidious_to_channel_list_item(
+            channel_renderer_to_invidious(self._renderer("1.2M subscribers", "345 videos"))
+        )
+        assert result.channelHandle is None
+        assert result.subCount == 1_200_000
+        assert result.videoCount == 345

@@ -147,3 +147,43 @@ class TestCorsConfiguration:
         assert response.headers.get("access-control-allow-origin") == "https://app.example.com"
         # Credentials header should not be present or should be false
         assert response.headers.get("access-control-allow-credentials") != "true"
+
+
+class TestMiddlewareOrder:
+    """CORS has to answer before Basic Auth rejects requests without credentials."""
+
+    def _app(self, monkeypatch):
+        from server import configure_middleware
+
+        monkeypatch.setattr(config, "CORS_ORIGINS", "https://app.example.com")
+        monkeypatch.setattr(config, "CORS_ALLOW_ALL", False)
+        monkeypatch.setattr(config, "CORS_ALLOW_CREDENTIALS", True)
+
+        app = FastAPI()
+
+        @app.get("/api/v1/search")
+        def search():
+            return []
+
+        configure_middleware(app)
+        return TestClient(app)
+
+    def test_preflight_is_answered_without_credentials(self, monkeypatch, test_db_with_user):
+        response = self._app(monkeypatch).options(
+            "/api/v1/search",
+            headers={
+                "Origin": "https://app.example.com",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Authorization",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "https://app.example.com"
+        assert "authorization" in response.headers.get("access-control-allow-headers", "").lower()
+
+    def test_authentication_errors_are_readable_cross_origin(self, monkeypatch, test_db_with_user):
+        response = self._app(monkeypatch).get("/api/v1/search", headers={"Origin": "https://app.example.com"})
+
+        assert response.status_code == 401
+        assert response.headers.get("access-control-allow-origin") == "https://app.example.com"

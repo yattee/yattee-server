@@ -441,12 +441,18 @@ def channel_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
     title = _extract_text(renderer.get("title"))
     description = _extract_text(renderer.get("descriptionSnippet"))
 
-    # Subscriber count
     sub_count_text = _extract_text(renderer.get("subscriberCountText"))
-    sub_count = _parse_count_text(sub_count_text)
-
-    # Video count
     video_count_text = _extract_text(renderer.get("videoCountText"))
+
+    # Channels with a handle show it in place of the subscriber count,
+    # which moves to the video count's place
+    channel_handle = None
+    if sub_count_text.startswith("@"):
+        channel_handle = sub_count_text
+        sub_count_text = video_count_text
+        video_count_text = ""
+
+    sub_count = _parse_count_text(sub_count_text)
     video_count = _parse_count_text(video_count_text)
 
     # Thumbnails
@@ -463,6 +469,7 @@ def channel_renderer_to_invidious(renderer: Dict[str, Any]) -> Dict[str, Any]:
         "type": "channel",
         "authorId": channel_id,
         "author": title,
+        "channelHandle": channel_handle,
         "description": description,
         "subCount": sub_count,
         "subCountText": sub_count_text,
@@ -724,6 +731,15 @@ def _decode_xtags(raw: Optional[str]) -> Dict[str, str]:
     return out
 
 
+def _byte_range(byte_range: Dict[str, Any]) -> Optional[str]:
+    """Format an InnerTube `{start, end}` byte range as Invidious' `start-end`."""
+    start = byte_range.get("start")
+    end = byte_range.get("end")
+    if start is None or end is None:
+        return None
+    return f"{start}-{end}"
+
+
 def _format_to_invidious(fmt: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a single InnerTube streamingData format to Invidious shape.
 
@@ -736,6 +752,8 @@ def _format_to_invidious(fmt: Dict[str, Any]) -> Dict[str, Any]:
     mime_type = fmt.get("mimeType", "")
     parts = _parse_mime_type(mime_type)
     height = fmt.get("height")
+    init_range = fmt.get("initRange") or {}
+    index_range = fmt.get("indexRange") or {}
     width = fmt.get("width")
     bitrate = fmt.get("bitrate")
     is_audio = parts["type"].startswith("audio/") if parts["type"] else False
@@ -755,6 +773,9 @@ def _format_to_invidious(fmt: Dict[str, Any]) -> Dict[str, Any]:
         "quality": fmt.get("qualityLabel") or fmt.get("quality", "") or (f"{height}p" if height else ""),
         "size": str(fmt.get("contentLength")) if fmt.get("contentLength") else None,
         "audioQuality": fmt.get("audioQuality") if is_audio else None,
+        # Byte ranges of the initialization and index sections, which DASH players need
+        "init": _byte_range(init_range),
+        "index": _byte_range(index_range),
         "_xtags": _decode_xtags(fmt.get("xtags")),
     }
 

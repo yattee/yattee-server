@@ -31,6 +31,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import posixpath
 import re
 import time
 import urllib.parse
@@ -38,12 +39,13 @@ from typing import Optional
 
 import httpx
 from fastapi import HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 import tokens as token_utils
 from egress import is_youtube_url, local_address_for
 from routers.proxy._streaming import router
 from settings import get_settings
+from utils import get_base_url
 from ytdlp_wrapper import is_safe_url
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,11 @@ RETRYABLE_UPSTREAM_ERRORS = (
 
 HLS_CONTENT_TYPES = ("application/vnd.apple.mpegurl", "application/x-mpegurl")
 DASH_CONTENT_TYPES = ("application/dash+xml",)
+
+# HLS players read the segment type from the file extension, which relay URLs
+# hide. googlevideo labels live segments as application/octet-stream, so the
+# relay reports the type the extension stands for instead.
+_SEGMENT_CONTENT_TYPES = {".ts": "video/mp2t", ".aac": "audio/aac", ".m4s": "video/iso.segment", ".vtt": "text/vtt"}
 
 # yt-dlp's default UA — what googlevideo expects.
 UPSTREAM_USER_AGENT = (
@@ -327,7 +334,8 @@ async def _stream_chunked_with_retry(
 # --- Endpoint ---------------------------------------------------------------
 
 
-@router.get("/relay")
+# Players also send HEAD requests to learn the type of a segment whose URL has no file extension
+@router.api_route("/relay", methods=["GET", "HEAD"])
 async def relay(
     request: Request,
     url: str,
@@ -410,12 +418,18 @@ async def relay(
     # HLS manifests are tiny — just refetch in full (the meta probe only got
     # 1 byte), then rewrite segment URLs. Don't chunk; don't retry; don't
     # try to be clever.
+    if is_hls and meta.status_code in (200, 206) and request.method == "HEAD":
+        await meta.aclose()
+        await client.aclose()
+        return Response(headers={"content-type": "application/vnd.apple.mpegurl"})
+
     if is_hls and meta.status_code in (200, 206):
         await meta.aclose()
         try:
             full = await client.get(url, headers={**upstream_headers})
             text = full.text
-            base_url_self = f"{request.url.scheme}://{request.url.netloc}"
+            # Honour X-Forwarded-Proto, so segments stay on HTTPS behind a reverse proxy
+            base_url_self = get_base_url(request)
             rewritten = _rewrite_hls(text, base_url=base_url_self, manifest_url=url, ttl_seconds=DEFAULT_TTL_SECONDS)
             headers = {"content-type": "application/vnd.apple.mpegurl"}
             for h in ("cache-control", "etag", "last-modified"):
@@ -480,8 +494,17 @@ async def relay(
             response_headers[h] = v
     if ct:
         response_headers["content-type"] = ct
+    elif response_headers.get("content-type", "application/octet-stream") == "application/octet-stream":
+        extension = posixpath.splitext(urllib.parse.urlsplit(url).path)[1].lower()
+        segment_type = _SEGMENT_CONTENT_TYPES.get(extension)
+        if segment_type:
+            response_headers["content-type"] = segment_type
 
     await meta.aclose()
+
+    if request.method == "HEAD":
+        await client.aclose()
+        return Response(status_code=response_status, headers=response_headers)
 
     async def body_iter():
         try:

@@ -180,6 +180,8 @@ def invidious_to_video_response(
                 itag=str(itag),
                 type=fmt.get("type", ""),
                 container=fmt.get("container", ""),
+                init=fmt.get("init"),
+                index=fmt.get("index"),
                 resolution=fmt.get("resolution"),
                 width=fmt.get("width"),
                 height=fmt.get("height"),
@@ -421,6 +423,7 @@ def invidious_to_channel_list_item(info: dict, invidious_base_url: str = "") -> 
     return ChannelListItem(
         authorId=info.get("authorId", ""),
         author=info.get("author", ""),
+        channelHandle=info.get("channelHandle"),
         description=info.get("description"),
         subCount=info.get("subCount"),
         subCountText=info.get("subCountText"),
@@ -453,7 +456,7 @@ def invidious_to_playlist_list_item(info: dict, invidious_base_url: str = "") ->
         title=info.get("title", ""),
         author=info.get("author"),
         authorId=info.get("authorId"),
-        videoCount=info.get("videoCount", 0),
+        videoCount=info.get("videoCount") or 0,
         playlistThumbnail=playlist_thumbnail,
         videos=videos,
     )

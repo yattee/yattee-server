@@ -165,11 +165,18 @@ def convert_formats(
             if not hls_url:
                 continue
 
+            # The relay rewrites the manifest so that its segments are relayed as well
+            stream_url = hls_url
+            if proxy_mode == "relay" and proxy_base_url and base_url:
+                from routers.proxy import signed_relay_url
+
+                stream_url = signed_relay_url(base_url, hls_url, content_type="application/vnd.apple.mpegurl")
+
             # HLS streams are muxed - add them as format streams
             hls_height = fmt.get("height")
             hls_width = fmt.get("width")
             new_stream = FormatStream(
-                url=hls_url,  # Direct URL to HLS manifest
+                url=stream_url,
                 itag=itag,
                 type="application/vnd.apple.mpegurl",
                 quality=f"{hls_height}p" if hls_height else fmt.get("format_note") or "unknown",

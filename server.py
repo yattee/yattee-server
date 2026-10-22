@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import sys
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -105,9 +106,6 @@ def configure_cors(app: FastAPI) -> None:
     )
 
 
-configure_cors(app)
-
-
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Middleware to add security headers to all responses."""
 
@@ -122,11 +120,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Add Security Headers middleware
-app.add_middleware(SecurityHeadersMiddleware)
+class RelativeRedirectMiddleware(BaseHTTPMiddleware):
+    """Make redirects to this server relative.
 
-# Add Basic Auth middleware (only enforced when enabled in settings)
-app.add_middleware(BasicAuthMiddleware)
+    Starlette builds absolute redirect URLs (e.g. when it adds or removes a
+    trailing slash) from the scheme uvicorn sees, which is `http` behind a
+    TLS-terminating reverse proxy. A relative location keeps the client on the
+    scheme and host it actually used.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        location = response.headers.get("location")
+        if location and 300 <= response.status_code < 400:
+            target = urllib.parse.urlsplit(location)
+            if target.netloc and target.netloc == request.url.netloc:
+                response.headers["location"] = urllib.parse.urlunsplit(
+                    ("", "", target.path or "/", target.query, target.fragment)
+                )
+        return response
+
+
+def configure_middleware(app: FastAPI) -> None:
+    """Add the middleware stack. The middleware added last runs first."""
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RelativeRedirectMiddleware)
+    # Only enforced once the first user exists
+    app.add_middleware(BasicAuthMiddleware)
+    # CORS has to run before authentication: browsers send preflight requests
+    # without credentials, and they need CORS headers to read auth errors
+    configure_cors(app)
+
+
+configure_middleware(app)
 
 # Mount API routers
 app.include_router(videos.router, prefix="/api/v1")

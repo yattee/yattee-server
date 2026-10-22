@@ -41,6 +41,21 @@ def _maybe_relay_manifest(
     return signed_relay_url(base_url, url, content_type=content_type)
 
 
+def _live_manifest_url(info: dict) -> Optional[str]:
+    """Return the HLS master manifest of a live stream.
+
+    yt-dlp only sets `manifest_url` on the HLS formats, not on the info dict.
+    """
+    if not info.get("is_live"):
+        return None
+    if info.get("manifest_url"):
+        return info["manifest_url"]
+    for fmt in info.get("formats") or []:
+        if (fmt.get("protocol") or "").startswith("m3u8") and fmt.get("manifest_url"):
+            return fmt["manifest_url"]
+    return None
+
+
 def get_author_thumbnail_url(info: dict) -> Optional[str]:
     """Extract author/channel thumbnail URL from video info."""
     # yt-dlp sometimes includes channel thumbnail in the thumbnails array
@@ -180,7 +195,7 @@ def ytdlp_to_video_response(
         liveNow=info.get("is_live") or False,
         isUpcoming=info.get("is_upcoming") or False,
         hlsUrl=_maybe_relay_manifest(
-            info.get("manifest_url") if info.get("is_live") else None,
+            _live_manifest_url(info),
             base_url=base_url,
             proxy_mode=effective_proxy_mode,
             content_type="application/vnd.apple.mpegurl",
@@ -284,7 +299,7 @@ def ytdlp_to_playlist_list_item(info: dict) -> PlaylistListItem:
         title=info.get("title", ""),
         author=info.get("playlist_uploader") or info.get("playlist_channel"),
         authorId=info.get("playlist_channel_id") or info.get("playlist_uploader_id"),
-        videoCount=info.get("playlist_count", 0),
+        videoCount=info.get("playlist_count") or 0,
         playlistThumbnail=thumbnail_url,
         videos=[],  # yt-dlp flat-playlist doesn't include video details
     )
