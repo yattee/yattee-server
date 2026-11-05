@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -71,6 +72,9 @@ async def run_ytdlp_download(
             itag,
             "--no-part",  # Don't use .part files
             "--no-mtime",  # Don't set file modification time
+            # Fixups (e.g. FixupM4a, FixupM3u8) remux the finished file and os.replace() it in place
+            # while it is still being streamed, splicing two different files for the client (#23).
+            "--fixup", "never",
             "--socket-timeout", "30",  # Longer socket timeout
             "--retries", "10",  # More retries on network errors
             "--fragment-retries", "10",  # Retry individual fragments
@@ -173,33 +177,78 @@ async def _rate_limited_download(
 
 
 async def stream_file_as_it_downloads(file_path: Path, download_key: str, expected_size: int):
-    """Stream a file as it's being downloaded by yt-dlp."""
+    """Stream a file as it's being downloaded by yt-dlp.
+
+    The file is opened once and all reads and size checks go through that descriptor.
+    If the path gets replaced underneath us (e.g. a post-processing remux doing
+    os.replace()), we keep streaming the original inode intact instead of continuing
+    at the same offset in a different file (#23).
+    """
     bytes_sent = 0
     chunk_size = 256 * 1024  # 256KB chunks
     stall_count = 0
     max_stalls = 1800  # 180 seconds max wait (1800 * 0.1s) - increased for long videos
+    f = None
+    replaced_warned = False
 
-    while True:
-        # Check download status
-        async with _downloads_lock:
-            download_info = _active_downloads.get(download_key, {})
-            is_complete = download_info.get("complete", False)
-            has_error = download_info.get("error")
+    try:
+        while True:
+            # Check download status
+            async with _downloads_lock:
+                download_info = _active_downloads.get(download_key, {})
+                is_complete = download_info.get("complete", False)
+                has_error = download_info.get("error")
 
-        if has_error:
-            logger.error(f"[FastDownload] Stream error: {has_error}")
-            break
+            if has_error:
+                logger.error(f"[FastDownload] Stream error: {has_error}")
+                break
 
-        # Check current file size
-        try:
-            current_size = file_path.stat().st_size if file_path.exists() else 0
-        except OSError:
+            if f is not None:
+                try:
+                    fd_stat = os.fstat(f.fileno())
+                    path_ino = file_path.stat().st_ino
+                except FileNotFoundError:
+                    path_ino = None
+                except OSError as e:
+                    logger.error(f"[FastDownload] Stat error: {e}")
+                    await asyncio.sleep(0.1)
+                    continue
+
+                if path_ino is not None and path_ino != fd_stat.st_ino:
+                    if bytes_sent == 0:
+                        # Nothing sent yet (e.g. yt-dlp retry recreated the file) - switch to the new one
+                        await f.close()
+                        f = None
+                    elif not replaced_warned:
+                        logger.warning(
+                            f"[FastDownload] {file_path.name} was replaced mid-stream after {bytes_sent} bytes; "
+                            f"continuing with the original file"
+                        )
+                        replaced_warned = True
+
+            # Open the file once it appears
+            if f is None:
+                try:
+                    f = await aiofiles.open(file_path, "rb")
+                except FileNotFoundError:
+                    f = None
+                except OSError as e:
+                    logger.error(f"[FastDownload] Open error: {e}")
+                    f = None
+
+            # Current size of the file we are actually reading
             current_size = 0
+            if f is not None:
+                try:
+                    current_size = os.fstat(f.fileno()).st_size
+                except OSError as e:
+                    logger.error(f"[FastDownload] Stat error: {e}")
+                    await asyncio.sleep(0.1)
+                    continue
 
-        # Read available data
-        if current_size > bytes_sent:
-            try:
-                async with aiofiles.open(file_path, "rb") as f:
+            # Read available data
+            if current_size > bytes_sent:
+                try:
                     await f.seek(bytes_sent)
                     while bytes_sent < current_size:
                         to_read = min(chunk_size, current_size - bytes_sent)
@@ -210,30 +259,33 @@ async def stream_file_as_it_downloads(file_path: Path, download_key: str, expect
                             yield chunk
                         else:
                             break
-            except OSError as e:
-                logger.error(f"[FastDownload] Read error: {e}")
-                await asyncio.sleep(0.1)
-                continue
+                except OSError as e:
+                    logger.error(f"[FastDownload] Read error: {e}")
+                    await asyncio.sleep(0.1)
+                    continue
 
-        # Check if download is complete and we've sent everything
-        if is_complete and bytes_sent >= current_size:
-            logger.info(f"[FastDownload] Stream complete: {bytes_sent} bytes")
-            break
+            # Check if download is complete and we've sent everything
+            if is_complete and bytes_sent >= current_size:
+                logger.info(f"[FastDownload] Stream complete: {bytes_sent} bytes")
+                break
 
-        # Wait for more data
-        stall_count += 1
-        if stall_count > max_stalls:
-            logger.error(
-                f"[FastDownload] Stream stalled for too long "
-                f"(sent {bytes_sent} bytes, expected {expected_size})"
-            )
-            # Mark download as stalled so subsequent requests will restart it
-            async with _downloads_lock:
-                if download_key in _active_downloads:
-                    _active_downloads[download_key]["error"] = f"Stream stalled after {bytes_sent} bytes"
-            break
+            # Wait for more data
+            stall_count += 1
+            if stall_count > max_stalls:
+                logger.error(
+                    f"[FastDownload] Stream stalled for too long "
+                    f"(sent {bytes_sent} bytes, expected {expected_size})"
+                )
+                # Mark download as stalled so subsequent requests will restart it
+                async with _downloads_lock:
+                    if download_key in _active_downloads:
+                        _active_downloads[download_key]["error"] = f"Stream stalled after {bytes_sent} bytes"
+                break
 
-        await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)
+    finally:
+        if f is not None:
+            await f.close()
 
 
 @router.get("/fast/{video_id}")
