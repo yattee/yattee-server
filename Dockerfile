@@ -31,6 +31,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ENV DENO_INSTALL="/opt/deno"
+
 # Install system dependencies including deno for yt-dlp JS challenge solving
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -42,7 +44,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Add deno to PATH
-ENV DENO_INSTALL="/root/.deno"
 ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 # Install Python dependencies
