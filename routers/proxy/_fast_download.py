@@ -236,6 +236,26 @@ async def stream_file_as_it_downloads(file_path: Path, download_key: str, expect
         await asyncio.sleep(0.1)
 
 
+def _track_rank(fmt: dict) -> int:
+    """Rank a format's audio track: higher means more likely to be the original language.
+
+    yt-dlp sets language_preference to 10 for the original/default track of a
+    multi-language video and -1 for dubs. Formats without the field rank 0.
+    """
+    pref = fmt.get("language_preference")
+    if isinstance(pref, (int, float)):
+        return int(pref)
+    note = str(fmt.get("format_note") or "").lower()
+    return 10 if "original" in note else 0
+
+
+def _prefer_original_track(candidates: list[dict]) -> dict | None:
+    """Pick the best-ranked track; ties keep yt-dlp's list order."""
+    if not candidates:
+        return None
+    return max(candidates, key=_track_rank)
+
+
 @router.get("/fast/{video_id}")
 async def fast_download(
     video_id: str,
@@ -286,12 +306,14 @@ async def fast_download(
             # yt-dlp returns format_ids like "251-drc", "251-0", "140-1" etc.
             # but Invidious-compatible API returns just "251", "140"
             # So we need to match formats that start with the itag
-            for fmt in formats:
-                format_id = str(fmt.get("format_id", ""))
-                # Exact match or match with suffix (e.g., "251" matches "251-drc", "251-0")
-                if format_id == itag or format_id.startswith(f"{itag}-"):
-                    selected_format = fmt
-                    break
+            matches = [
+                fmt
+                for fmt in formats
+                if str(fmt.get("format_id", "")) == itag or str(fmt.get("format_id", "")).startswith(f"{itag}-")
+            ]
+            # Multi-language videos list one entry per audio track under the same itag
+            # ("140-0", "140-1", ...), so prefer the original track over list order.
+            selected_format = _prefer_original_track(matches)
 
             # If no exact match found for external sites, fallback to quality-based matching
             # External site format IDs (like Facebook) can change between extractions
@@ -314,7 +336,7 @@ async def fast_download(
                     # Audio format
                     audio_formats = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") != "none"]
                     if audio_formats:
-                        selected_format = max(audio_formats, key=lambda x: x.get("abr", 0) or 0)
+                        selected_format = max(audio_formats, key=lambda x: (_track_rank(x), x.get("abr", 0) or 0))
 
                 if selected_format:
                     logger.info(f"[FastDownload] Quality fallback selected format: {selected_format.get('format_id')}")
@@ -322,7 +344,7 @@ async def fast_download(
             if format == "bestaudio":
                 audio_formats = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") != "none"]
                 if audio_formats:
-                    selected_format = max(audio_formats, key=lambda x: x.get("abr", 0) or 0)
+                    selected_format = max(audio_formats, key=lambda x: (_track_rank(x), x.get("abr", 0) or 0))
             elif format == "bestvideo":
                 video_formats = [f for f in formats if f.get("vcodec") != "none" and f.get("acodec") == "none"]
                 if video_formats:
