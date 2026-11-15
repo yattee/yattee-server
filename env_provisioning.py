@@ -1,6 +1,7 @@
 """Auto-provisioning from environment variables for automated deployments."""
 
 import logging
+import os
 
 import auth
 import config
@@ -61,6 +62,15 @@ def _provision_invidious():
 def _provision_egress_proxy():
     """Configure YouTube egress proxy from env var."""
     url = config.YT_EGRESS_PROXY
+    # An explicitly empty environment variable disables a proxy previously
+    # persisted in SQLite. An absent variable leaves admin settings untouched.
+    if "YT_EGRESS_PROXY" in os.environ and not url:
+        s = settings_module.load_settings()
+        s.yt_egress_proxy = None
+        s.yt_egress_proxy_enabled = False
+        settings_module.save_settings(s)
+        logger.info("ENV provisioning: disabled persisted YT egress proxy")
+        return
     if not url:
         return
 
