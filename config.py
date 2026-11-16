@@ -39,8 +39,12 @@ SECURE_COOKIES = os.getenv("SECURE_COOKIES", "true").lower() in ("true", "1", "y
 # Skip TLS certificate verification in yt-dlp (not recommended for production)
 YTDLP_SKIP_TLS_VERIFY = os.getenv("YTDLP_SKIP_TLS_VERIFY", "false").lower() in ("true", "1", "yes")
 
-# HTTP proxy for YouTube-bound egress (yt-dlp, InnerTube, Invidious fallback).
-# Format: http://[user:pass@]host:port or socks5://host:port
+# HTTP proxy for YouTube-bound egress (yt-dlp, InnerTube, /proxy/relay of
+# googlevideo media). Format: scheme://[user:password@]host:port with scheme in
+# http, https, socks4, socks4a, socks5, socks5h. Raw credentials may contain
+# @ : / # % or spaces: egress.normalize_proxy_url() percent-encodes them once,
+# for every client. A malformed value makes YouTube requests fail with a clear
+# (credential-free) error instead of silently going out directly.
 YT_EGRESS_PROXY = os.getenv("YT_EGRESS_PROXY") or None
 
 # Force IP family for YouTube-bound egress: "auto", "ipv4" or "ipv6".

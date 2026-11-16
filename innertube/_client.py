@@ -216,7 +216,12 @@ async def get_client() -> httpx.AsyncClient:
         # proxy= and transport= would shadow the transport entirely —
         # effective_ip_family() returns "auto" while the proxy is active.
         network_kwargs = {}
-        proxy = s.effective_yt_egress_proxy()
+        try:
+            proxy = s.effective_yt_egress_proxy()
+        except egress.ProxyConfigError as e:
+            raise InnerTubeError(
+                f"YouTube egress proxy configuration is invalid: {e}", is_retryable=False
+            ) from e
         local_addr = egress.local_address_for(s.effective_ip_family())
         if proxy:
             network_kwargs["proxy"] = proxy
@@ -237,6 +242,12 @@ async def get_client() -> httpx.AsyncClient:
             },
         )
     return _client
+
+
+def _configured_proxy_for_logs() -> Optional[str]:
+    """The raw configured proxy (for redaction only — never for logging as-is)."""
+    s = settings_module.get_settings()
+    return s.yt_egress_proxy if s.yt_egress_proxy_enabled else None
 
 
 async def reset_client() -> None:
@@ -337,8 +348,18 @@ async def innertube_post(endpoint: str, body: Dict[str, Any], use_cookies: bool 
             last_error = InnerTubeError(msg, is_retryable=True)
 
         except httpx.RequestError as e:
-            msg = f"Request failed: {e}"
-            logger.warning(f"[InnerTube] Request error: {endpoint} - {e}")
+            # The proxy URL (and its credentials) must never reach logs/errors.
+            raw_proxy = _configured_proxy_for_logs()
+            safe = egress.redact_secrets(str(e), raw_proxy)
+            msg = f"Request failed: {safe}"
+            if raw_proxy:
+                logger.warning(
+                    "[Egress] stage=innertube cause=%s proxy=%s error=%s",
+                    egress.classify_egress_failure(f"{type(e).__name__} {safe}", proxy_configured=True),
+                    egress.redact_proxy_url(raw_proxy),
+                    type(e).__name__,
+                )
+            logger.warning(f"[InnerTube] Request error: {endpoint} - {safe}")
             last_error = InnerTubeError(msg, is_retryable=True)
 
         except InnerTubeError:

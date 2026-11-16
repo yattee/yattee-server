@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import avatar_cache
 import database
+import egress
 import settings as settings_module
 from utils import get_base_url
 
@@ -45,7 +46,13 @@ class SettingsResponse(BaseModel):
     default_search_results: int
     max_search_results: int
     yt_egress_proxy_enabled: bool
+    # Never the real value: credentials are redacted (scheme://***@host:port).
     yt_egress_proxy: Optional[str]
+    yt_egress_proxy_configured: bool = False
+    yt_egress_proxy_scheme: Optional[str] = None
+    yt_egress_proxy_host: Optional[str] = None
+    yt_egress_proxy_port: Optional[int] = None
+    yt_egress_proxy_authentication_configured: bool = False
     yt_ip_family: str
     yt_pot_enabled: bool
     yt_pot_provider_url: Optional[str]
@@ -124,6 +131,21 @@ class SettingsUpdate(BaseModel):
     proxy_max_concurrent_downloads: Optional[int] = None
 
 
+def _settings_response(settings: "settings_module.Settings") -> SettingsResponse:
+    """Build the API response; the egress proxy credentials are never included."""
+    data = settings.model_dump()
+    raw = data.get("yt_egress_proxy")
+    meta = egress.describe_proxy(raw)
+    data["yt_egress_proxy"] = egress.redact_proxy_url(raw) if raw else None
+    data["yt_egress_proxy_configured"] = bool(raw)
+    if meta.get("valid"):
+        data["yt_egress_proxy_scheme"] = meta["scheme"]
+        data["yt_egress_proxy_host"] = meta["host"]
+        data["yt_egress_proxy_port"] = meta.get("port")
+        data["yt_egress_proxy_authentication_configured"] = bool(meta.get("authenticated"))
+    return SettingsResponse(**data)
+
+
 # =============================================================================
 # Settings API
 # =============================================================================
@@ -133,7 +155,7 @@ class SettingsUpdate(BaseModel):
 async def get_settings(admin: dict = Depends(get_current_admin)):
     """Get current server settings."""
     settings = settings_module.get_settings()
-    return SettingsResponse(**settings.model_dump())
+    return _settings_response(settings)
 
 
 @router.put("/api/settings", response_model=SettingsResponse)
@@ -144,13 +166,31 @@ async def update_settings(data: SettingsUpdate, admin: dict = Depends(get_curren
     current = settings_module.get_settings()
     update_data = data.model_dump(exclude_unset=True)
 
+    # Validate + canonicalize the egress proxy at the API boundary so a malformed
+    # URL is rejected with a clear (credential-free) message instead of breaking
+    # every YouTube request later.
+    submitted_proxy = update_data.get("yt_egress_proxy")
+    stored_proxy = current.yt_egress_proxy
+    if submitted_proxy and stored_proxy and submitted_proxy == egress.redact_proxy_url(stored_proxy):
+        # The client echoed back the redacted display value from GET: keep the
+        # stored secret untouched instead of overwriting it with "***".
+        del update_data["yt_egress_proxy"]
+    elif submitted_proxy:
+        try:
+            update_data["yt_egress_proxy"] = egress.normalize_proxy_url(submitted_proxy)
+        except egress.ProxyConfigError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid yt_egress_proxy: {e}")
+
     # Merge with current settings
     merged = {**current.model_dump(), **update_data}
 
     try:
         new_settings = settings_module.Settings(**merged)
     except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Pydantic echoes offending input values; never let the proxy secret out.
+        raise HTTPException(
+            status_code=400, detail=egress.redact_secrets(str(e), merged.get("yt_egress_proxy"))
+        )
 
     settings_module.save_settings(new_settings)
 
@@ -189,7 +229,7 @@ async def update_settings(data: SettingsUpdate, admin: dict = Depends(get_curren
         except ImportError:
             pass
 
-    return SettingsResponse(**new_settings.model_dump())
+    return _settings_response(new_settings)
 
 
 # =============================================================================

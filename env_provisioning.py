@@ -1,10 +1,12 @@
 """Auto-provisioning from environment variables for automated deployments."""
 
 import logging
+import os
 
 import auth
 import config
 import database
+import egress
 import settings as settings_module
 
 logger = logging.getLogger(__name__)
@@ -60,14 +62,35 @@ def _provision_invidious():
 def _provision_egress_proxy():
     """Configure YouTube egress proxy from env var."""
     url = config.YT_EGRESS_PROXY
+    # An explicitly empty environment variable disables a proxy previously
+    # persisted in SQLite. An absent variable leaves admin settings untouched.
+    if "YT_EGRESS_PROXY" in os.environ and not url:
+        s = settings_module.load_settings()
+        s.yt_egress_proxy = None
+        s.yt_egress_proxy_enabled = False
+        settings_module.save_settings(s)
+        logger.info("ENV provisioning: disabled persisted YT egress proxy")
+        return
     if not url:
         return
 
     s = settings_module.load_settings()
-    s.yt_egress_proxy = url
+    try:
+        # Store the canonical form (credentials percent-encoded) so every
+        # client — yt-dlp, InnerTube, relay — reads exactly the same value.
+        s.yt_egress_proxy = egress.normalize_proxy_url(url)
+    except egress.ProxyConfigError as e:
+        # Keep the raw value: the runtime fails CLOSED with a clear error
+        # instead of silently falling back to direct datacenter egress.
+        s.yt_egress_proxy = url
+        logger.error(
+            "ENV provisioning: YT_EGRESS_PROXY is malformed (%s); YouTube requests will fail "
+            "until it is fixed",
+            e,
+        )
     s.yt_egress_proxy_enabled = True
     settings_module.save_settings(s)
-    logger.info("ENV provisioning: configured YT egress proxy")
+    logger.info("ENV provisioning: configured YT egress proxy %s", egress.redact_proxy_url(url))
 
 
 def _provision_ip_family():
