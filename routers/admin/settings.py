@@ -49,6 +49,14 @@ class SettingsResponse(BaseModel):
     yt_ip_family: str
     yt_pot_enabled: bool
     yt_pot_provider_url: Optional[str]
+    hls_filter_enabled: bool
+    hls_audio_language: Optional[str]
+    hls_min_height: int
+    hls_max_height: int
+    hls_dash_enabled: bool
+    hls_dash_audio_languages: Optional[str]
+    hls_dash_prefer_av1: bool
+    hls_dash_relay: bool
     innertube_enabled: bool
     invidious_enabled: bool
     invidious_instance: Optional[str]
@@ -94,6 +102,14 @@ class SettingsUpdate(BaseModel):
     yt_ip_family: Optional[Literal["auto", "ipv4", "ipv6"]] = None
     yt_pot_enabled: Optional[bool] = None
     yt_pot_provider_url: Optional[str] = None
+    hls_filter_enabled: Optional[bool] = None
+    hls_audio_language: Optional[str] = None
+    hls_min_height: Optional[int] = None
+    hls_max_height: Optional[int] = None
+    hls_dash_enabled: Optional[bool] = None
+    hls_dash_audio_languages: Optional[str] = None
+    hls_dash_prefer_av1: Optional[bool] = None
+    hls_dash_relay: Optional[bool] = None
     innertube_enabled: Optional[bool] = None
     invidious_enabled: Optional[bool] = None
     invidious_instance: Optional[str] = None

@@ -34,11 +34,39 @@ def _maybe_relay_manifest(
     Manifest URLs from googlevideo are time-limited and IP-bound just like
     individual segment URLs, so they need the same off-LAN handling.
     """
-    if not url or proxy_mode != "relay" or not base_url:
+    if not url:
+        return url
+    is_hls = content_type == "application/vnd.apple.mpegurl"
+    if is_hls and base_url:
+        # Hand the master to /proxy/hls-master, which serves a single variant
+        # so mpv/ffmpeg does not probe 100+ muxed variants on start.
+        from routers.proxy import signed_hls_master_url
+        from routers.proxy._hls_master import filter_enabled
+
+        if filter_enabled():
+            return signed_hls_master_url(base_url, url, relay=(proxy_mode == "relay"))
+    if proxy_mode != "relay" or not base_url:
         return url
     from routers.proxy import signed_relay_url
 
     return signed_relay_url(base_url, url, content_type=content_type)
+
+
+def _hls_manifest_url(info: dict) -> Optional[str]:
+    """Master HLS playlist for the video - for VOD as well as live.
+
+    yt-dlp only sets ``manifest_url`` at the top level for live streams, but
+    YouTube serves a master playlist for VOD too and every m3u8 format carries
+    its URL. Without it the client only ever sees fixed DASH renditions, so it
+    cannot adapt: a dip in throughput stalls playback instead of stepping the
+    quality down.
+    """
+    if info.get("is_live") and info.get("manifest_url"):
+        return info["manifest_url"]
+    for fmt in info.get("formats") or []:
+        if str(fmt.get("protocol") or "").startswith("m3u8") and fmt.get("manifest_url"):
+            return fmt["manifest_url"]
+    return None
 
 
 def get_author_thumbnail_url(info: dict) -> Optional[str]:
@@ -180,7 +208,7 @@ def ytdlp_to_video_response(
         liveNow=info.get("is_live") or False,
         isUpcoming=info.get("is_upcoming") or False,
         hlsUrl=_maybe_relay_manifest(
-            info.get("manifest_url") if info.get("is_live") else None,
+            _hls_manifest_url(info),
             base_url=base_url,
             proxy_mode=effective_proxy_mode,
             content_type="application/vnd.apple.mpegurl",

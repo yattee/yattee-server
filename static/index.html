@@ -670,6 +670,97 @@
                     </div>
                 </div>
 
+                <!-- HLS Master Filter Section -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">HLS Playback (Yattee 2 / mpv)</h3>
+                    <div class="flex items-center gap-3 mb-4">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="hls_filter_enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div>
+                            <label class="font-medium cursor-pointer">Filter HLS master playlists</label>
+                            <small class="block text-muted text-sm">Serve VOD HLS via <code>/proxy/hls-master</code>: the API lists one HLS stream per quality (e.g. "HLS 1080p", "HLS 720p") and each one plays exactly that quality with the chosen audio language. YouTube's masters are muxed video+audio per language; mpv probes every variant before playing (130+ variants = ~60 s start) and cannot switch audio between them, so a single variant is served per stream.</small>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="hls-audio-language" class="block mb-2 font-medium">HLS audio language</label>
+                            <input type="text" id="hls-audio-language" placeholder="empty = original audio" class="input-base" x-model="hls_audio_language" :disabled="!hls_filter_enabled">
+                            <small class="block text-muted text-sm mt-1">Language code (e.g. <code>pl</code>). Uses that dub when the video has one, otherwise the original track.</small>
+                        </div>
+                        <div>
+                            <label for="hls-min-height" class="block mb-2 font-medium">Lowest HLS quality</label>
+                            <select id="hls-min-height" class="input-base" x-model.number="hls_min_height" :disabled="!hls_filter_enabled">
+                                <option value="0">No limit</option>
+                                <option value="2160">2160p (4K)</option>
+                                <option value="1440">1440p</option>
+                                <option value="1080">1080p</option>
+                                <option value="720">720p</option>
+                                <option value="480">480p</option>
+                                <option value="360">360p</option>
+                                <option value="240">240p</option>
+                                <option value="144">144p</option>
+                            </select>
+                            <small class="block text-muted text-sm mt-1">Qualities below this are not offered.</small>
+                        </div>
+                        <div>
+                            <label for="hls-max-height" class="block mb-2 font-medium">Highest HLS quality</label>
+                            <select id="hls-max-height" class="input-base" x-model.number="hls_max_height" :disabled="!hls_filter_enabled">
+                                <option value="0">No limit</option>
+                                <option value="2160">2160p (4K)</option>
+                                <option value="1440">1440p</option>
+                                <option value="1080">1080p</option>
+                                <option value="720">720p</option>
+                                <option value="480">480p</option>
+                                <option value="360">360p</option>
+                                <option value="240">240p</option>
+                                <option value="144">144p</option>
+                            </select>
+                            <small class="block text-muted text-sm mt-1">Qualities above this are not offered. YouTube HLS tops out at 1080p (H.264); 4K is DASH only.</small>
+                        </div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-border">
+                        <div class="flex items-center gap-3 mb-4">
+                            <label class="toggle">
+                                <input type="checkbox" x-model="hls_dash_enabled" :disabled="!hls_filter_enabled">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div>
+                                <label class="font-medium cursor-pointer">Translate DASH to HLS (4K + audio languages)</label>
+                                <small class="block text-muted text-sm">Builds HLS playlists from YouTube's DASH formats: byte-range segments are fetched by the player straight from googlevideo (nothing streams through this server), audio tracks are separate renditions with language names, and qualities above 1080p (AV1) become available. Replaces YouTube's own HLS entries in the API.</small>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="hls-dash-audio-languages" class="block mb-2 font-medium">Extra audio languages</label>
+                                <input type="text" id="hls-dash-audio-languages" placeholder="e.g. pl,en" class="input-base" x-model="hls_dash_audio_languages" :disabled="!hls_filter_enabled || !hls_dash_enabled">
+                                <small class="block text-muted text-sm mt-1">The original track is always included. Each extra track costs one more probe at start, so keep the list short.</small>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <label class="toggle">
+                                    <input type="checkbox" x-model="hls_dash_prefer_av1" :disabled="!hls_filter_enabled || !hls_dash_enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <label class="font-medium cursor-pointer">Prefer AV1 over H.264</label>
+                                    <small class="block text-muted text-sm">Above 1080p AV1 is used regardless (no H.264 there). Hardware AV1 decoding needs M3 / A17 Pro or newer.</small>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <label class="toggle">
+                                    <input type="checkbox" x-model="hls_dash_relay" :disabled="!hls_filter_enabled || !hls_dash_enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <label class="font-medium cursor-pointer">Relay segments through this server</label>
+                                    <small class="block text-muted text-sm">Keep on. googlevideo drops idle connections after a few minutes, which freezes the video in mpv after a pause (audio keeps playing). Off = segments go straight to googlevideo. Behind a reverse proxy, raise its idle timeouts above the longest pause you expect (nginx: <code>keepalive_timeout</code>, <code>send_timeout</code>, <code>proxy_read_timeout</code>; defaults are 60–75 s).</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Search & Other Section -->
                 <div class="mb-8">
                     <h3 class="text-lg font-medium mb-4 pb-2 border-b border-border">Other Settings</h3>

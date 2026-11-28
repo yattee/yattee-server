@@ -255,16 +255,14 @@ def invidious_to_video_response(
 
     hls_url = info.get("hlsUrl")
     if hls_url:
-        if effective_proxy_mode == "relay" and base_url:
-            from routers.proxy import signed_relay_url
+        from converters._ytdlp import _maybe_relay_manifest
 
-            hls_url = signed_relay_url(
-                base_url,
-                resolve_invidious_url(hls_url, invidious_base_url),
-                content_type="application/vnd.apple.mpegurl",
-            )
-        else:
-            hls_url = resolve_invidious_url(hls_url, invidious_base_url)
+        hls_url = _maybe_relay_manifest(
+            resolve_invidious_url(hls_url, invidious_base_url),
+            base_url=base_url,
+            proxy_mode=effective_proxy_mode,
+            content_type="application/vnd.apple.mpegurl",
+        )
 
     dash_url = info.get("dashUrl")
     if dash_url:

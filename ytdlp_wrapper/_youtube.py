@@ -116,6 +116,8 @@ async def get_video_info(video_id: str, use_cache: bool = True) -> dict:
         "--no-playlist",
         "--remote-components",
         "ejs:github",  # Required for JS challenge solving
+        "--extractor-args",
+        "youtube:player_client=default,web_safari",  # web_safari emits HLS (VOD) + supports cookies
         f"https://www.youtube.com/watch?v={video_id}",
     )
 

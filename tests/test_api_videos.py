@@ -377,7 +377,11 @@ class TestGetVideoInnerTubeHybrid:
         stream_18 = next(s for s in data["formatStreams"] if s["itag"] == "18")
         assert "googlevideo.com" in stream_18["url"]
         # HLS / DASH from InnerTube are passed through
-        assert data["hlsUrl"] == "https://manifest.googlevideo.com/hls/master.m3u8"
+        # The master is translated into per-quality HLS entries (see _dash_hls);
+        # the bare hlsUrl goes away so the client cannot pick the unfiltered master.
+        assert data["hlsUrl"] is None
+        hls = [f for f in data["formatStreams"] if f["container"] == "hls"]
+        assert hls and all(f["url"].startswith("http://testserver/proxy/dash-hls/master?") for f in hls)
         assert data["dashUrl"] == "https://manifest.googlevideo.com/dash/manifest.mpd"
 
     def test_merge_drops_itag_missing_in_ytdlp(self, sample_innertube_video, sample_ytdlp_video):
